@@ -1,0 +1,48 @@
+{
+	"width": 7,
+	"height": 7,
+	"name": "Diagonal",
+	"author": "Perodactyl",
+
+	"exits": [
+		{
+			"index": 0,
+			"entry_location": [0, 0, 7],
+			"entry_direction": "se",
+			"exit_location": [0, 0, 9],
+			"exit_direction": "nw"
+		},
+		{
+			"index": 1,
+			"entry_location": [6, 6, 7],
+			"entry_direction": "nw",
+			"exit_location": [6, 6, 9],
+			"exit_direction": "se"
+		},
+		{
+			"index": 2,
+			"entry_location": [0, 6, 7],
+			"entry_direction": "ne",
+			"exit_location": [0, 6, 9],
+			"exit_direction": "sw"
+		},
+		{
+			"index": 3,
+			"entry_location": [6, 0, 7],
+			"entry_direction": "sw",
+			"exit_location": [6, 0, 9],
+			"exit_direction": "ne"
+		}
+	],
+	"beacons": [
+		{
+			"index": 0,
+			"location": [3, 3]
+		}
+	],
+	"airports": [],
+	"path_markers": [
+		[1, 1], [2, 2], [4, 4], [5, 5], [6, 6],
+		[1, 5], [2, 4], [4, 2], [5, 1]
+	]
+}

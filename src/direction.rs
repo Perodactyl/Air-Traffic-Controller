@@ -1,10 +1,17 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CardinalDirection {
+    #[serde(alias = "n")]
     North,
+    #[serde(alias = "s")]
     South,
+    #[serde(alias = "e")]
     East,
+    #[serde(alias = "w")]
     West
 } impl Into<OrdinalDirection> for CardinalDirection {
     fn into(self) -> OrdinalDirection {
@@ -37,15 +44,24 @@ pub enum CardinalDirection {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum OrdinalDirection {
+    #[serde(alias = "n")]
     North,
+    #[serde(alias = "s")]
     South,
+    #[serde(alias = "e")]
     East,
+    #[serde(alias = "w")]
     West,
+    #[serde(alias = "ne")]
     NorthEast,
+    #[serde(alias = "se")]
     SouthEast,
+    #[serde(alias = "nw")]
     NorthWest,
+    #[serde(alias = "sw")]
     SouthWest,
 } impl OrdinalDirection {
     pub fn as_offset(&self) -> (i16, i16) {

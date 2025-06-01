@@ -1,9 +1,11 @@
+use serde::Deserialize;
+
 use crate::{command::{Command, Setting}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, GroundLocation}};
 
 pub const COMMAND_TARGET_EMPHASIS: &str = "\x1b[4m";
 pub const COMMAND_TARGET_EMPHASIS_RESET: &str = "\x1b[24m";
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Airport {
     pub location: GroundLocation,
     pub launch_direction: CardinalDirection,
@@ -21,10 +23,10 @@ pub struct Airport {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Deserialize)]
 pub struct Beacon {
-    pub location: GroundLocation,
     pub index: u16,
+    pub location: GroundLocation,
 } impl Beacon {
     pub fn to_display_string(&self, colorize: bool) -> String {
         format!("{}*{}{}", if colorize { "\x1b[33m" } else { "" }, self.index, if colorize { "\x1b[39m" } else { "" })
@@ -42,7 +44,7 @@ pub struct Beacon {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct Exit {
     pub index: u16,
     pub entry_location: AirLocation,
@@ -78,7 +80,8 @@ pub struct RenderGrid {
         }
     }
     fn index_of(&self, x: u16, y: u16) -> usize {
-        (y * self.width + x) as usize
+        eprintln!("{x} {y}");
+        ((y as usize) * (self.width as usize)) + (x as usize)
     }
     fn get(&self, x: u16, y: u16) -> &str {
         &self.tiles[self.index_of(x, y)]

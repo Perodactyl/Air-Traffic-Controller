@@ -1,8 +1,10 @@
+use serde::Deserialize;
+
 use crate::{direction::OrdinalDirection, map_objects::{Airport, Exit, GridRenderable}};
 use std::{fmt::Display, ops::Add};
 
 ///Also used to represent a path marker.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct GroundLocation(pub u16, pub u16);
 impl From<AirLocation> for GroundLocation {
     fn from(value: AirLocation) -> Self {
@@ -25,7 +27,7 @@ impl From<AirLocation> for GroundLocation {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 pub struct AirLocation(pub u16, pub u16, pub u16);
 
 #[derive(Debug, Clone, Copy, PartialEq)]

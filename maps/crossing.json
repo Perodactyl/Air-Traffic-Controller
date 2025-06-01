@@ -1,0 +1,63 @@
+{
+	"width": 21,
+	"height": 21,
+	"name": "Crossing",
+	"author": "Perodactyl",
+
+	"exits": [
+		{
+			"index": 0,
+			"entry_location": [10, 0, 7],
+			"entry_direction": "south",
+			"exit_location": [10, 0, 9],
+			"exit_direction": "north"
+		},
+		{
+			"index": 1,
+			"entry_location": [20, 10, 7],
+			"entry_direction": "west",
+			"exit_location": [20, 10, 9],
+			"exit_direction": "east"
+		},
+		{
+			"index": 2,
+			"entry_location": [10, 20, 7],
+			"entry_direction": "north",
+			"exit_location": [10, 20, 9],
+			"exit_direction": "south"
+		},
+		{
+			"index": 3,
+			"entry_location": [0, 10, 7],
+			"entry_direction": "east",
+			"exit_location": [0, 10, 9],
+			"exit_direction": "west"
+		}
+	],
+	"beacons": [
+		{ "index": 0, "location": [4,  10] },
+		{ "index": 1, "location": [16, 10] },
+		{ "index": 2, "location": [10, 10] }
+	],
+	"airports": [
+		{
+			"index": 0,
+			"location": [4, 4],
+			"launch_direction": "south"
+		},
+		{
+			"index": 1,
+			"location": [16, 16],
+			"launch_direction": "north"
+		}
+	],
+	"path_markers": [
+		[10,  1], [10,  2], [10,  3], [10,  4], [10,  5], [10,  6], [10,  7], [10,  8], [10,  9],
+		[10, 11], [10, 12], [10, 13], [10, 14], [10, 15], [10, 16], [10, 17], [10, 18], [10, 19],
+		[1,  10], [2,  10], [3,  10], [4,  10], [5,  10], [6,  10], [7,  10], [8,  10], [9,  10],
+		[11, 10], [12, 10], [13, 10], [14, 10], [15, 10], [16, 10], [17, 10], [18, 10], [19, 10],
+
+		[4,   5], [4,   6], [4,   7], [4,   8], [4,   9],
+		[16, 15], [16, 14], [16, 13], [16, 12], [16, 11]
+	]
+}

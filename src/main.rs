@@ -1,4 +1,6 @@
 use std::{fmt::Display, io::{self, IsTerminal, Read, Write}, time::{Duration, Instant}};
+use clap::Parser;
+use serde::Deserialize;
 use rand::{prelude::*, random, random_range, rng};
 
 use anyhow::Result;
@@ -165,20 +167,41 @@ enum GameStatus {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, tabled::Tabled)]
 struct Map {
+    #[tabled(rename = "Map")]
+    name: String,
+    #[tabled(rename = "Author")]
+    author: String,
+
+    #[tabled(skip)]
     width: u16,
+    #[tabled(skip)]
     height: u16,
+    #[tabled(skip)]
+    #[serde(skip)]
     current_command: Command,
 
+    #[tabled(skip)]
     exits: Vec<Exit>,
+    #[tabled(skip)]
     beacons: Vec<Beacon>,
-    path_markers: Vec<GroundLocation>,
+    #[tabled(skip)]
     airports: Vec<Airport>,
+    #[tabled(skip)]
+    path_markers: Vec<GroundLocation>,
 
+    #[tabled(skip)]
+    #[serde(skip)]
     planes: Vec<Plane>,
+    #[tabled(skip)]
+    #[serde(skip)]
     exit_state: Option<GameStatus>,
+    #[tabled(skip)]
+    #[serde(skip)]
     tick_no: u32,
+    #[tabled(skip)]
+    #[serde(skip)]
     planes_landed: u32,
 } impl Map {
     fn tick(&mut self) {
@@ -349,97 +372,46 @@ struct Map {
     }
 }
 
-macro_rules! path_markers {
-    {$($x:expr,$y:expr),*} => {
-        vec![
-            $(GroundLocation($x, $y),)+
-        ]
-    };
+#[derive(Parser, Debug)]
+#[command(version, about)]
+struct Args {
+    #[arg(short, long)]
+    list: bool,
+    #[arg(short, long, default_value_t = String::from("crossing"))]
+    map: String,
 }
 
 fn main() -> Result<()> {
+    let args = Args::parse();
+    eprintln!("{args:?}");
+    if args.list {
+        use std::fs::{read_dir, read};
+        let maps = read_dir("maps")?.map(|f| -> Result<Map> {
+            let file = f?;
+            let contents = read(file.path())?;
+            Ok(serde_json::de::from_slice(&contents)?)
+        }).filter_map(Result::ok).collect::<Vec<_>>();
+
+        println!("{}", tabled::Table::new(maps).with(tabled::settings::Style::blank()));
+        return Ok(());
+    }
+
     if !io::stdout().is_terminal() {
         panic!("Not an interactive terminal.");
     }
+    use std::{fs::{exists, read}, path::Path};
+    let map_file = if exists(&args.map)? { format!("{}", args.map) }
+    else if exists(&format!("{}.json", args.map))? { format!("{}.json", args.map) }
+    else { format!("maps/{}.json", args.map) };
+    eprintln!("{map_file:?}");
+    let map_data = read(&map_file)?;
+    let mut map: Map = serde_json::de::from_slice(&map_data)?;
+
     let mut stdout = io::stdout().into_raw_mode()?.into_alternate_screen()?;
     write!(stdout, "{}", termion::cursor::Hide)?;
     stdout.flush()?;
     let mut input = termion::async_stdin();
 
-    let mut map = Map {
-        width: 21,
-        height: 21,
-        current_command: Default::default(),
-        exits: vec![
-            Exit {
-                index: 0,
-                entry_location: AirLocation(10, 0, 7),
-                entry_direction: OrdinalDirection::South,
-                exit_location: AirLocation(10, 0, 9),
-                exit_direction: OrdinalDirection::North,
-            },
-            Exit {
-                index: 1,
-                entry_location: AirLocation(20, 10, 7),
-                entry_direction: OrdinalDirection::West,
-                exit_location: AirLocation(20, 10, 9),
-                exit_direction: OrdinalDirection::East,
-            },
-            Exit {
-                index: 2,
-                entry_location: AirLocation(10, 20, 7),
-                entry_direction: OrdinalDirection::North,
-                exit_location: AirLocation(10, 20, 9),
-                exit_direction: OrdinalDirection::South,
-            },
-            Exit {
-                index: 3,
-                entry_location: AirLocation(0, 10, 7),
-                entry_direction: OrdinalDirection::East,
-                exit_location: AirLocation(0, 10, 9),
-                exit_direction: OrdinalDirection::West,
-            }
-        ],
-        beacons: vec![
-            Beacon {
-                index: 0,
-                location: GroundLocation(4, 10),
-            },
-            Beacon {
-                index: 1,
-                location: GroundLocation(16, 10),
-            },
-            Beacon {
-                index: 2,
-                location: GroundLocation(10, 10),
-            }
-        ],
-        path_markers: path_markers![
-            10, 1, 10, 2, 10, 3, 10, 4, 10, 5, 10, 6, 10, 7, 10, 8, 10, 9,
-            10, 11, 10, 12, 10, 13, 10, 14, 10, 15, 10, 16, 10, 17, 10, 18, 10, 19, 10, 20,
-            1, 10, 2, 10, 3, 10, 5, 10, 6, 10, 7, 10, 8, 10, 9, 10,
-            11, 10, 12, 10, 13, 10, 14, 10, 15, 10, 17, 10, 18, 10, 19, 10, 20, 10,
-            4, 9, 4, 8, 4, 7, 4, 6, 4, 5,
-            16, 10, 16, 11, 16, 12, 16, 13, 16, 14, 16, 15
-        ],
-        airports: vec![
-            Airport {
-                index: 0,
-                location: GroundLocation(4, 4),
-                launch_direction: CardinalDirection::South,
-            },
-            Airport {
-                index: 1,
-                location: GroundLocation(16, 16),
-                launch_direction: CardinalDirection::North,
-            }
-        ],
-        planes: vec![],
-
-        exit_state: None,
-        tick_no: 0,
-        planes_landed: 0,
-    };
     map.render(&mut stdout)?;
 
     let mut char_buf = [0u8];
