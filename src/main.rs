@@ -2,7 +2,7 @@ use std::{fmt::Display, io::{self, IsTerminal, Read, Write}, time::{Duration, In
 use rand::{prelude::*, random, random_range, rng};
 
 use anyhow::Result;
-use termion::{input, raw::IntoRawMode, screen::IntoAlternateScreen};
+use termion::{raw::IntoRawMode, screen::IntoAlternateScreen};
 
 mod direction;
 use direction::{CardinalDirection, OrdinalDirection};
@@ -203,6 +203,24 @@ struct Map {
                 }
             }
         }
+        'check_collision: for plane_a in &self.planes {
+            for plane_b in &self.planes {
+                if !std::ptr::eq(plane_a, plane_b) {
+                    match (plane_a.location, plane_b.location) {
+                        (Location::Flight(AirLocation(ax, ay, az)), Location::Flight(AirLocation(bx, by, bz))) => {
+                            let dx = bx.abs_diff(ax);
+                            let dy = by.abs_diff(ay);
+                            let dz = bz.abs_diff(az);
+                            if dx <= 1 && dy <= 1 && dz <= 1 {
+                                self.exit_state = Some(GameStatus::PlanesCrashed(plane_a.callsign, plane_b.callsign));
+                                break 'check_collision;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         for (j, plane) in planes_to_remove.into_iter().enumerate() {
             self.planes.remove(plane - j);
             self.planes_landed += 1;
@@ -213,14 +231,26 @@ struct Map {
         self.tick_no += 1;
     }
     fn generate_plane(&mut self) {
+        if self.planes.len() == 26 {
+            return;
+        }
         let start = self.generate_location(None);
         let finish = self.generate_location(Some(start));
         let is_jet = random();
+        let callsign = 'generate: loop {
+            let c = random_range(if is_jet { b'a' ..= b'z' } else { b'A' ..= b'Z' }) as char;
+            for plane in &self.planes {
+                if plane.callsign.to_ascii_lowercase() == c.to_ascii_lowercase() {
+                    continue 'generate;
+                }
+            }
+            break c;
+        };
         self.planes.push(Plane {
             location: start.entry(),
             destination: finish,
             target_flight_level: start.entry_height(),
-            callsign: (random_range(if is_jet { b'a' ..= b'z' } else { b'A' ..= b'Z' }) as char),
+            callsign,
             is_jet,
             ticks_active: 0,
             current_direction: start.entry_dir(),

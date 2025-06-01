@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::{BufWriter, Cursor, Write}};
+use std::{fmt::Display, io::{BufWriter, Write}};
 
 use crate::{direction::OrdinalDirection, DisplayState};
 
@@ -115,24 +115,28 @@ pub struct CompleteCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum BeaconSetting {
+pub enum Setting<T> {
     #[default]
-    NotCurrentlySetting,
-    CurrentlySetting,
-    Set(u16),
-} impl BeaconSetting {
-    pub fn is_non_null(&self) -> bool {
+    ///Value is not currently being input by user.
+    Unset,
+    ///Value is currently being input by user.
+    Setting,
+    ///Value has been fully input by user.
+    Set(T),
+} impl<T> Setting<T> {
+    fn is_non_null(&self) -> bool {
         match self {
-            BeaconSetting::NotCurrentlySetting => false,
-            BeaconSetting::CurrentlySetting => true,
-            BeaconSetting::Set(_) => true,
+            Setting::Unset => false,
+            Setting::Setting => true,
+            Setting::Set(_) => true,
         }
     }
-} impl Into<Option<u16>> for BeaconSetting {
-    fn into(self) -> Option<u16> {
+} impl<T> Into<Option<T>> for Setting<T> {
+    fn into(self) -> Option<T> {
         match self {
-            BeaconSetting::Set(idx) => Some(idx),
-            _ => None,
+            Setting::Unset => None,
+            Setting::Setting => None,
+            Setting::Set(val) => Some(val),
         }
     }
 }
@@ -141,7 +145,7 @@ pub enum BeaconSetting {
 pub struct Command {
     pub plane: Option<char>,
     pub action: Option<Action>,
-    pub at: BeaconSetting,
+    pub at: Setting<u16>,
 } impl Command {
     pub fn try_complete(&self) -> Option<CompleteCommand> {
         match (self.plane, self.action?.try_complete(), self.at) {
@@ -167,8 +171,8 @@ pub struct Command {
             match self.action {
                 _ if letter == '\x7f' && self.at.is_non_null() => {
                     match self.at {
-                        BeaconSetting::Set(_) => self.at = BeaconSetting::CurrentlySetting,
-                        BeaconSetting::CurrentlySetting => self.at = BeaconSetting::NotCurrentlySetting,
+                        Setting::Set(_) => self.at = Setting::Setting,
+                        Setting::Setting => self.at = Setting::Unset,
                         _ => {}
                     }
                 },
@@ -223,15 +227,15 @@ pub struct Command {
                 Some(Action::Heading(ref mut dir)) if letter == '\x7f' => *dir = None,
                 Some(Action::Altitude(RelOrAbsolute::Plus(ref mut v) | RelOrAbsolute::Minus(ref mut v))) if letter == '\x7f' => *v = None,
                 
-                _ if self.at == BeaconSetting::NotCurrentlySetting => {
+                _ if self.at == Setting::Unset => {
                     if letter == 'a' || letter == '@' {
-                        self.at = BeaconSetting::CurrentlySetting;
+                        self.at = Setting::Setting;
                     }
                 },
-                _ if self.at == BeaconSetting::CurrentlySetting => {
+                _ if self.at == Setting::Setting => {
                     match letter {
-                        '0' ..= '9' => self.at = BeaconSetting::Set(((letter as u8) - b'0') as u16),
-                        '\x7f' => self.at = BeaconSetting::NotCurrentlySetting,
+                        '0' ..= '9' => self.at = Setting::Set(((letter as u8) - b'0') as u16),
+                        '\x7f' => self.at = Setting::Unset,
                         _ => {},
                     }
                 },
@@ -248,9 +252,9 @@ pub struct Command {
             write!(f, "{a}")?;
         }
         match self.at {
-            BeaconSetting::NotCurrentlySetting => {},
-            BeaconSetting::CurrentlySetting => write!(f, " at")?,
-            BeaconSetting::Set(b) => write!(f, " at \x1b[33m*{b}\x1b[0m")?,
+            Setting::Unset => {},
+            Setting::Setting => write!(f, " at")?,
+            Setting::Set(b) => write!(f, " at \x1b[33m*{b}\x1b[0m")?,
         }
         Ok(())
     }

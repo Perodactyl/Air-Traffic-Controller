@@ -1,4 +1,4 @@
-use crate::{command::{BeaconSetting, Command}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, GroundLocation}, DisplayState};
+use crate::{command::{Command, Setting}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, GroundLocation}, DisplayState};
 use std::{fmt::Display, io::Write};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,7 +107,7 @@ pub struct RenderGrid {
                     },
                     (
                         RenderCell::Beacon(index),
-                        Command { at: BeaconSetting::Set(target), .. }
+                        Command { at: Setting::Set(target), .. }
                     ) if index == *target => {
                         write!(output, "\x1b[1m")?;
                     },
