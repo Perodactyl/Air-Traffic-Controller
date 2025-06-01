@@ -1,0 +1,463 @@
+use std::{fmt::Display, io::{self, IsTerminal, Read, Write}, time::{Duration, Instant}};
+use rand::{prelude::*, random, random_range, rng};
+
+use anyhow::Result;
+use termion::{input, raw::IntoRawMode, screen::IntoAlternateScreen};
+
+mod direction;
+use direction::{CardinalDirection, OrdinalDirection};
+
+mod location;
+use location::{Location, Destination, GroundLocation, AirLocation};
+
+mod map_objects;
+use map_objects::{Airport, Exit, Beacon, RenderCell, RenderGrid};
+
+mod command;
+use command::{Command, CompleteAction, CompleteCommand, CompleteRelOrAbsolute};
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DisplayState {
+    Marked,
+    Unmarked,
+    Ignored,
+} impl Display for DisplayState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DisplayState::Marked => Ok(()),
+            DisplayState::Unmarked | DisplayState::Ignored => write!(f, "\x1b[2m"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Plane {
+    location: Location,
+    destination: Destination,
+    target_flight_level: u16,
+    callsign: char,
+    is_jet: bool,
+    ticks_active: u32,
+    target_direction: OrdinalDirection,
+    current_direction: OrdinalDirection,
+    show: DisplayState,
+    command: Option<CompleteCommand>,
+} impl Plane {
+    fn accept_cmd(&mut self, cmd: CompleteCommand, is_at_beacon: bool) {
+        let CompleteCommand { action, at, .. } = cmd;
+        if at.is_none() || is_at_beacon {
+            match action {
+                CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => self.target_flight_level = val,
+                CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => self.target_flight_level += val,
+                CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => self.target_flight_level -= val,
+                CompleteAction::Heading(targ) => self.target_direction = targ,
+                CompleteAction::SetVisiblity(v) => self.show = v,
+            }
+            if is_at_beacon {
+                if let Some(c) = self.command {
+                    if cmd == c {
+                        self.command = None;
+                    }
+                }
+            }
+        } else if at.is_some() {
+            self.command = Some(cmd);
+        }
+
+    }
+    fn tick(&mut self, is_at_beacon: bool) {
+        if let Some(cmd) = self.command {
+            self.accept_cmd(cmd, is_at_beacon);
+        }
+        match self.location {
+            Location::Flight(loc) => {
+                let AirLocation(mut x, mut y, mut flight_level) = loc;
+
+
+                if self.is_jet || self.ticks_active % 2 == 0 {
+                    match (self.target_flight_level).cmp(&flight_level) {
+                        std::cmp::Ordering::Less => {
+                            flight_level -= 1;
+                        }
+                        std::cmp::Ordering::Greater => {
+                            flight_level += 1;
+                        }
+                        std::cmp::Ordering::Equal => {}
+                    }
+                    if self.target_direction != self.current_direction {
+                        self.current_direction = self.current_direction.rotate_toward(self.target_direction);
+                    }
+                    let (offset_x, offset_y) = self.current_direction.as_offset();
+                    x = (x as i16 + offset_x) as u16;
+                    y = (y as i16 + offset_y) as u16;
+                    self.location = Location::Flight(AirLocation(x, y, flight_level));
+                }
+            },
+            Location::Airport(port) => {
+                if self.target_flight_level > 0 {
+                    let GroundLocation(x, y) = port.location + <CardinalDirection as Into<OrdinalDirection>>::into(port.launch_direction).as_offset();
+                    self.location = Location::Flight(AirLocation(x, y, 1));
+                }
+            }
+        }
+        self.ticks_active += 1;
+    }
+} impl Into<RenderCell> for &Plane {
+    fn into(self) -> RenderCell {
+        let Location::Flight(loc) = self.location else { panic!("Cannot convert grounded plane to RenderCell") };
+        RenderCell::Airplane(self.callsign, loc.2, self.show)
+    }
+} impl Into<Option<GroundLocation>> for &Plane {
+    fn into(self) -> Option<GroundLocation> {
+        let Location::Flight(loc) = self.location else { return None };
+        Some(GroundLocation::from(loc))
+    }
+} impl Display for Plane {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let height = match self.location {
+            Location::Flight(AirLocation(_, _, height)) => height,
+            _ => 0,
+        };
+        write!(f, "{}{}", self.callsign, height)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GameStatus {
+    PlanesCrashed(char, char),
+    PlaneExited(char),
+    PlaneFailedLanding(char),
+} impl Display for GameStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GameStatus::PlanesCrashed(a, b) => write!(f, "Plane {a} crashed into {b}."),
+            GameStatus::PlaneExited(p) => write!(f, "Plane {p} exited improperly."),
+            GameStatus::PlaneFailedLanding(p) => write!(f, "Plane {p} landed improperly."),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Map {
+    width: u16,
+    height: u16,
+    current_command: Command,
+
+    exits: Vec<Exit>,
+    beacons: Vec<Beacon>,
+    path_markers: Vec<GroundLocation>,
+    airports: Vec<Airport>,
+
+    planes: Vec<Plane>,
+    exit_state: Option<GameStatus>,
+    tick_no: u32,
+    planes_landed: u32,
+} impl Map {
+    fn tick(&mut self) {
+        if self.exit_state.is_some() { return; }
+
+        let mut planes_to_remove = vec![];
+        for (i, plane) in self.planes.iter_mut().enumerate() {
+            let mut is_at_beacon = false;
+            if let Some(CompleteCommand { at: Some(at), .. }) = plane.command {
+                for beacon in &self.beacons {
+                    if beacon.index == at && beacon.location == plane.location.into() {
+                        is_at_beacon = true;
+                        if plane.show == DisplayState::Unmarked {
+                            plane.show = DisplayState::Marked;
+                        }
+                        break
+                    };
+                }
+            }
+            plane.tick(is_at_beacon);
+            if let Location::Flight(loc) = plane.location {
+                let AirLocation(x, y, level) = loc;
+                if level == 0 {
+                    let mut success = false;
+                    for airport in &self.airports {
+                        if airport.location == GroundLocation(x, y) {
+                            if <CardinalDirection as Into<OrdinalDirection>>::into(airport.launch_direction) == plane.current_direction {
+                                success = true;
+                                break;
+                            }
+                        }
+                    }
+                    if success {
+                        planes_to_remove.push(i);
+                    } else {
+                        self.exit_state = Some(GameStatus::PlaneFailedLanding(plane.callsign));
+                    }
+                } else {
+                    let mut exited_correctly = false;
+                    for exit in &self.exits {
+                        if exit.exit_location == loc && exit.exit_direction == plane.current_direction {
+                            planes_to_remove.push(i);
+                            exited_correctly = true;
+                            break;
+                        }
+                    }
+                    if !exited_correctly && (x == 0 || x == self.width-1 || y == 0 || y == self.height-1) {
+                        self.exit_state = Some(GameStatus::PlaneExited(plane.callsign));
+                    }
+                }
+            }
+        }
+        for (j, plane) in planes_to_remove.into_iter().enumerate() {
+            self.planes.remove(plane - j);
+            self.planes_landed += 1;
+        }
+        if self.tick_no % 30 == 0 {
+            self.generate_plane();
+        }
+        self.tick_no += 1;
+    }
+    fn generate_plane(&mut self) {
+        let start = self.generate_location(None);
+        let finish = self.generate_location(Some(start));
+        let is_jet = random();
+        self.planes.push(Plane {
+            location: start.entry(),
+            destination: finish,
+            target_flight_level: start.entry_height(),
+            callsign: (random_range(if is_jet { b'a' ..= b'z' } else { b'A' ..= b'Z' }) as char),
+            is_jet,
+            ticks_active: 0,
+            current_direction: start.entry_dir(),
+            target_direction: start.entry_dir(),
+            show: DisplayState::Marked,
+            command: Default::default(),
+        });
+    }
+    fn generate_location(&self, exclude: Option<Destination>) -> Destination {
+        let mut pool = vec![];
+        for exit in &self.exits {
+            let candidate = Destination::Exit(*exit);
+            if let Some(exclude) = exclude {
+                if candidate == exclude {
+                    continue;
+                }
+            }
+            pool.push(candidate);
+        }
+        for airport in &self.airports {
+            let candidate = Destination::Airport(*airport);
+            if let Some(exclude) = exclude {
+                if candidate == exclude {
+                    continue;
+                }
+            }
+            pool.push(candidate);
+        }
+
+        *pool.choose(&mut rng()).expect("location pool to be non-empty")
+    }
+    fn render(&self, output: &mut impl Write) -> Result<()> {
+        let mut grid = RenderGrid::new(self.width, self.height);
+        for mark in &self.path_markers {
+            grid.set_loc(*mark, RenderCell::PathMark);
+        }
+        for exit in &self.exits {
+            grid.set_loc(exit.into(), exit.into());
+        }
+        for beacon in &self.beacons {
+            grid.set_loc(beacon.into(), beacon.into());
+        }
+        for airport in &self.airports {
+            grid.set_loc(airport.into(), airport.into());
+        }
+        for plane in &self.planes {
+            if let Some(location) = plane.into() {
+                grid.set_loc(location, plane.into());
+            }
+        }
+
+        write!(output, "{}{}", termion::cursor::Goto(1, 1), termion::clear::All)?;
+        grid.render(output, &self.current_command)?;
+        let table_left = self.width * 2 + 2;
+        let mut table_top = 3;
+        write!(output, "{}Time: {:<4} Score: {:<4}", termion::cursor::Goto(table_left, 1), self.tick_no, self.planes_landed)?;
+        write!(output, "{}\x1b[1mplane dest cmd\x1b[0m", termion::cursor::Goto(table_left, 2))?;
+        for plane in &self.planes {
+            match plane.show {
+                DisplayState::Marked => {
+                    write!(output, "{}{}", termion::cursor::Goto(table_left, table_top), plane)?;
+                    if let Location::Airport(a) = plane.location {
+                        write!(output, "@{}", <&Airport as Into<RenderCell>>::into(&a))?;
+                    } else {
+                        write!(output, "   ")?;
+                    }
+                    write!(output, " {}", plane.destination)?;
+                    if let Some(cmd) = plane.command {
+                        write!(output, "   {cmd}")?;
+                    }
+                },
+                DisplayState::Unmarked => {
+                    write!(output, "\x1b[2m{}{}    {}", termion::cursor::Goto(table_left, table_top), plane, plane.destination)?;
+                    if let Some(cmd) = plane.command {
+                        write!(output, "   {}", cmd.to_string_uncolored()?)?;
+                    }
+                    write!(output, "\x1b[0m")?;
+                },
+                DisplayState::Ignored => {
+                    write!(output, "\x1b[2m{}{}    {}   --- \x1b[0m", termion::cursor::Goto(table_left, table_top), plane, plane.destination)?;
+                }
+            }
+            table_top += 1;
+        }
+        match self.exit_state {
+            None => write!(output, "{}{}", termion::cursor::Goto(1, self.height + 2), self.current_command)?,
+            Some(msg) => write!(output, "{}{}", termion::cursor::Goto(1, self.height + 2), msg)?,
+        }
+
+        output.flush()?;
+
+        Ok(())
+    }
+}
+
+macro_rules! path_markers {
+    {$($x:expr,$y:expr),*} => {
+        vec![
+            $(GroundLocation($x, $y),)+
+        ]
+    };
+}
+
+fn main() -> Result<()> {
+    if !io::stdout().is_terminal() {
+        panic!("Not an interactive terminal.");
+    }
+    let mut stdout = io::stdout().into_raw_mode()?.into_alternate_screen()?;
+    write!(stdout, "{}", termion::cursor::Hide)?;
+    stdout.flush()?;
+    let mut input = termion::async_stdin();
+
+    let mut map = Map {
+        width: 21,
+        height: 21,
+        current_command: Default::default(),
+        exits: vec![
+            Exit {
+                index: 0,
+                entry_location: AirLocation(10, 0, 7),
+                entry_direction: OrdinalDirection::South,
+                exit_location: AirLocation(10, 0, 9),
+                exit_direction: OrdinalDirection::North,
+            },
+            Exit {
+                index: 1,
+                entry_location: AirLocation(20, 10, 7),
+                entry_direction: OrdinalDirection::West,
+                exit_location: AirLocation(20, 10, 9),
+                exit_direction: OrdinalDirection::East,
+            },
+            Exit {
+                index: 2,
+                entry_location: AirLocation(10, 20, 7),
+                entry_direction: OrdinalDirection::North,
+                exit_location: AirLocation(10, 20, 9),
+                exit_direction: OrdinalDirection::South,
+            },
+            Exit {
+                index: 3,
+                entry_location: AirLocation(0, 10, 7),
+                entry_direction: OrdinalDirection::East,
+                exit_location: AirLocation(0, 10, 9),
+                exit_direction: OrdinalDirection::West,
+            }
+        ],
+        beacons: vec![
+            Beacon {
+                index: 0,
+                location: GroundLocation(4, 10),
+            },
+            Beacon {
+                index: 1,
+                location: GroundLocation(16, 10),
+            },
+            Beacon {
+                index: 2,
+                location: GroundLocation(10, 10),
+            }
+        ],
+        path_markers: path_markers![
+            10, 1, 10, 2, 10, 3, 10, 4, 10, 5, 10, 6, 10, 7, 10, 8, 10, 9,
+            10, 11, 10, 12, 10, 13, 10, 14, 10, 15, 10, 16, 10, 17, 10, 18, 10, 19, 10, 20,
+            1, 10, 2, 10, 3, 10, 5, 10, 6, 10, 7, 10, 8, 10, 9, 10,
+            11, 10, 12, 10, 13, 10, 14, 10, 15, 10, 17, 10, 18, 10, 19, 10, 20, 10,
+            4, 9, 4, 8, 4, 7, 4, 6, 4, 5,
+            16, 10, 16, 11, 16, 12, 16, 13, 16, 14, 16, 15
+        ],
+        airports: vec![
+            Airport {
+                index: 0,
+                location: GroundLocation(4, 4),
+                launch_direction: CardinalDirection::South,
+            },
+            Airport {
+                index: 1,
+                location: GroundLocation(16, 16),
+                launch_direction: CardinalDirection::North,
+            }
+        ],
+        planes: vec![],
+
+        exit_state: None,
+        tick_no: 0,
+        planes_landed: 0,
+    };
+    map.render(&mut stdout)?;
+
+    let mut char_buf = [0u8];
+    let mut last_tick = Instant::now();
+    let mut is_dirty = true;
+    
+    'game: loop {
+        if let Ok(count) = input.read(&mut char_buf) {
+            if count > 0 {
+                is_dirty = true;
+                let ch = char_buf[0] as char;
+                if ch == '\x03' {
+                    break 'game;
+                } else if ch == '\x1b' {
+                    map.current_command.reset();
+                } else if ch == '\n' || ch == '\r' {
+                    if let Some(cmd) = map.current_command.try_complete() {
+                        for plane in &mut map.planes {
+                            if plane.callsign.to_ascii_lowercase() == cmd.plane.to_ascii_lowercase() {
+                                plane.accept_cmd(cmd, false);
+                                break;
+                            }
+                        }
+                        map.current_command.reset();
+                    }
+                    if map.current_command.is_empty() {
+                        last_tick = Instant::now();
+                        map.tick();
+                        is_dirty = true;
+                    }
+                } else {
+                    map.current_command.input(ch);
+                }
+            }
+        }
+        
+        if Instant::now().duration_since(last_tick) >= Duration::from_secs(1) {
+            last_tick = Instant::now();
+            map.tick();
+            is_dirty = true;
+        }
+        
+        if is_dirty {
+            map.render(&mut stdout)?;
+            is_dirty = false;
+        }
+    }
+
+    drop(stdout);
+    drop(input);
+    print!("{}", termion::cursor::Show);
+
+    Ok(())
+}
