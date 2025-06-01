@@ -32,12 +32,35 @@ pub enum CompleteAction {
     Altitude(CompleteRelOrAbsolute),
     Heading(OrdinalDirection),
     SetVisiblity(Visibility),
+    Circle(CircleDirection),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CircleDirection {
+    #[default]
+    Clockwise,
+    CounterClockwise
+} impl CircleDirection {
+    fn to_short_string(&self) -> &str {
+        match self {
+            CircleDirection::Clockwise => "CW",
+            CircleDirection::CounterClockwise => "CCW",
+        }
+    }
+} impl Display for CircleDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CircleDirection::Clockwise => write!(f, "clockwise"),
+            CircleDirection::CounterClockwise => write!(f, "counter-clockwise"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     Altitude(RelOrAbsolute),
     Heading(Option<OrdinalDirection>),
+    Circle(Option<CircleDirection>),
     SetVisibility(Visibility),
 } impl Action {
     pub fn try_complete(&self) -> Option<CompleteAction> {
@@ -45,6 +68,7 @@ pub enum Action {
             Self::Altitude(a) => a.try_into().ok().map(CompleteAction::Altitude),
             Self::Heading(h) => h.map(CompleteAction::Heading),
             Self::SetVisibility(v) => Some(CompleteAction::SetVisiblity(*v)),
+            Self::Circle(d) => Some(CompleteAction::Circle(d.unwrap_or_default())),
         }
     }
 } impl Display for Action {
@@ -61,6 +85,10 @@ pub enum Action {
             Action::Heading(val) => match val {
                 Some(dir) => write!(f, "turn to {}", dir.to_deg()),
                 None => write!(f, "turn to"),
+            },
+            Action::Circle(dir) => match dir {
+                None => write!(f, "circle"),
+                Some(d) => write!(f, "circle {d}"),
             },
             Action::SetVisibility(Visibility::Marked) => write!(f, "mark"),
             Action::SetVisibility(Visibility::Unmarked) => write!(f, "unmark"),
@@ -82,6 +110,7 @@ pub struct CompleteCommand {
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => format!("alt: +{val}"),
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => format!("alt: -{val}"),
                 CompleteAction::Heading(dir) => format!("hdg: {}", dir.to_deg()),
+                CompleteAction::Circle(dir) => format!("circle {}", dir.to_short_string()),
                 CompleteAction::SetVisiblity(Visibility::Marked) => format!("mark"),
                 CompleteAction::SetVisiblity(Visibility::Unmarked) => format!("unmark"),
                 CompleteAction::SetVisiblity(Visibility::Ignored) => format!("ignore"),
@@ -150,7 +179,7 @@ pub struct Command {
                 self.plane = Some(letter);
             }
         } else {
-            match self.action {
+            match self.action { // This REALLY needs to get tidied up.
                 _ if letter == '\x7f' && self.at.is_non_null() => {
                     match self.at {
                         Setting::Set(_) => self.at = Setting::Setting,
@@ -164,10 +193,18 @@ pub struct Command {
                     'i' => self.action = Some(Action::SetVisibility(Visibility::Ignored)),
                     'u' => self.action = Some(Action::SetVisibility(Visibility::Unmarked)),
                     'm' => self.action = Some(Action::SetVisibility(Visibility::Marked)),
+                    'c' => self.action = Some(Action::Circle(None)),
                     '\x7f' => self.plane = None,
                     _ => {},
                 },
                 Some(Action::SetVisibility(_)) if letter == '\x7f' => self.action = None,
+                Some(Action::Circle(None)) => match letter {
+                    'q' | '[' | 'h' => self.action = Some(Action::Circle(Some(CircleDirection::CounterClockwise))),
+                    'e' | ']' | 'l' => self.action = Some(Action::Circle(Some(CircleDirection::Clockwise))),
+                    '\x7f' => self.action = None,
+                    _ => {},
+                },
+                Some(Action::Circle(Some(_))) if letter == '\x7f' => self.action = Some(Action::Circle(None)),
                 Some(Action::Altitude(RelOrAbsolute::Undefined)) => match letter {
                     '-' | '_' => self.action = Some(Action::Altitude(RelOrAbsolute::Minus(None))),
                     '+' | '=' => self.action = Some(Action::Altitude(RelOrAbsolute::Plus(None))),
@@ -185,6 +222,7 @@ pub struct Command {
                     '\x7f' => self.action = Some(Action::Altitude(RelOrAbsolute::Undefined)),
                     _ => {},
                 },
+                Some(Action::Altitude(RelOrAbsolute::To(_))) if letter == '\x7f' => self.action = Some(Action::Altitude(RelOrAbsolute::Undefined)),
                 /*
                  * Keybinds:
                  *  qwe  789  yki 

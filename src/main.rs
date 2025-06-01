@@ -40,7 +40,6 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    eprintln!("{args:?}");
     if args.list {
         use std::fs::{read_dir, read};
         let maps = read_dir("maps")?.map(|f| -> Result<Map> {
@@ -60,7 +59,6 @@ fn main() -> Result<()> {
     let map_file = if exists(&args.map)? { format!("{}", args.map) }
     else if exists(&format!("{}.json", args.map))? { format!("{}.json", args.map) }
     else { format!("maps/{}.json", args.map) };
-    eprintln!("{map_file:?}");
     let map_data = read(&map_file)?;
     let mut map: Map = serde_json::de::from_slice(&map_data)?;
 

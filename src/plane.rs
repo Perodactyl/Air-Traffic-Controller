@@ -36,14 +36,29 @@ pub struct Plane {
                 CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => self.target_flight_level = val,
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => self.target_flight_level += val,
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => self.target_flight_level -= val,
-                CompleteAction::Heading(targ) => self.target_direction = targ,
+                CompleteAction::Heading(targ) => {
+                    self.target_direction = targ;
+                    if let Some(CompleteCommand { action: CompleteAction::Circle(_), .. }) = self.command {
+                        self.command = None;
+                    }
+                },
+                CompleteAction::Circle(dir) => {
+                    self.target_direction = self.current_direction.rotated_90(dir);
+                    self.command = Some(CompleteCommand {
+                      plane: self.callsign,
+                        action: CompleteAction::Circle(dir),
+                        at: None,
+                    });
+                },
                 CompleteAction::SetVisiblity(v) => self.show = v,
             }
             if is_at_beacon {
                 if let Some(c) = self.command {
-                    if cmd == c {
-                        self.command = None;
-                    }
+                    match c {
+                        CompleteCommand { action: CompleteAction::SetVisiblity(_), .. } => {},
+                        CompleteCommand { action: CompleteAction::Circle(_), .. } => {},
+                        _ => self.command = None,
+                    };
                 }
             }
         } else if at.is_some() {

@@ -89,7 +89,6 @@ pub struct RenderGrid {
         }
     }
     fn index_of(&self, x: u16, y: u16) -> usize {
-        eprintln!("{x} {y}");
         ((y as usize) * (self.width as usize)) + (x as usize)
     }
     fn get(&self, x: u16, y: u16) -> &str {

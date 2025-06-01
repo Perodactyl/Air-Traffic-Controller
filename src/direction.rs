@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use serde::Deserialize;
 
+use crate::command::CircleDirection;
+
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CardinalDirection {
@@ -155,6 +157,29 @@ pub enum OrdinalDirection {
             (SouthWest, NorthEast) => NorthWest,
             (West, East)           => North,
             (NorthWest, SouthEast) => NorthEast,
+        }
+    }
+    pub fn rotated_90(&self, direction: CircleDirection) -> OrdinalDirection {
+        use OrdinalDirection::*;
+        use CircleDirection::*;
+        match (self, direction) {
+            (North,     Clockwise)        => East,
+            (NorthEast, Clockwise)        => SouthEast,
+            (East,      Clockwise)        => South,
+            (SouthEast, Clockwise)        => SouthWest,
+            (South,     Clockwise)        => West,
+            (SouthWest, Clockwise)        => NorthWest,
+            (West,      Clockwise)        => North,
+            (NorthWest, Clockwise)        => NorthEast,
+
+            (North,     CounterClockwise) => West,
+            (NorthWest, CounterClockwise) => SouthWest,
+            (West,      CounterClockwise) => South,
+            (SouthWest, CounterClockwise) => SouthEast,
+            (South,     CounterClockwise) => East,
+            (SouthEast, CounterClockwise) => NorthEast,
+            (East,      CounterClockwise) => North,
+            (NorthEast, CounterClockwise) => NorthWest,
         }
     }
     pub fn to_deg(&self) -> u16 {
