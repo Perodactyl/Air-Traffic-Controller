@@ -1,6 +1,7 @@
-use crate::{map_objects::{Airport, Exit}, direction::OrdinalDirection};
+use crate::{direction::OrdinalDirection, map_objects::{Airport, Exit, GridRenderable}};
 use std::{fmt::Display, ops::Add};
 
+///Also used to represent a path marker.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GroundLocation(pub u16, pub u16);
 impl From<AirLocation> for GroundLocation {
@@ -14,6 +15,13 @@ impl From<AirLocation> for GroundLocation {
             ((self.0 as i16) + rhs.0) as u16,
             ((self.1 as i16) + rhs.1) as u16
         )
+    }
+} impl GridRenderable for GroundLocation {
+    fn location(&self) -> Option<GroundLocation> {
+        Some(*self)
+    }
+    fn render(&self, _command: &crate::command::Command) -> String {
+        "+ ".to_string()
     }
 }
 

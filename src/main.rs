@@ -11,7 +11,7 @@ mod location;
 use location::{Location, Destination, GroundLocation, AirLocation};
 
 mod map_objects;
-use map_objects::{Airport, Exit, Beacon, RenderCell, RenderGrid};
+use map_objects::{Airport, Beacon, Exit, GridRenderable, ListRenderable, RenderGrid, COMMAND_TARGET_EMPHASIS, COMMAND_TARGET_EMPHASIS_RESET};
 
 mod command;
 use command::{Command, CompleteAction, CompleteCommand, CompleteRelOrAbsolute};
@@ -102,23 +102,51 @@ struct Plane {
         }
         self.ticks_active += 1;
     }
-} impl Into<RenderCell> for &Plane {
-    fn into(self) -> RenderCell {
-        let Location::Flight(loc) = self.location else { panic!("Cannot convert grounded plane to RenderCell") };
-        RenderCell::Airplane(self.callsign, loc.2, self.show)
+    fn flight_level(&self) -> u16 {
+        match self.location {
+            Location::Airport(_) => 0,
+            Location::Flight(AirLocation(_, _, fl)) => fl,
+        }
     }
-} impl Into<Option<GroundLocation>> for &Plane {
-    fn into(self) -> Option<GroundLocation> {
-        let Location::Flight(loc) = self.location else { return None };
-        Some(GroundLocation::from(loc))
+} impl GridRenderable for Plane {
+    fn location(&self) -> Option<GroundLocation> {
+        match self.location {
+            Location::Airport(_) => None,
+            Location::Flight(air_location) => Some(air_location.into()),
+        }
     }
-} impl Display for Plane {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let height = match self.location {
-            Location::Flight(AirLocation(_, _, height)) => height,
-            _ => 0,
+    fn render(&self, command: &Command) -> String {
+        let emphasis = match command {
+            Command { plane: Some(callsign), .. } if callsign.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => COMMAND_TARGET_EMPHASIS,
+            _ => "",
         };
-        write!(f, "{}{}", self.callsign, height)
+        let color = match self.show {
+            DisplayState::Marked => "\x1b[32m",
+            _ => "\x1b[2m",
+        };
+
+        format!("{}{}{}{}\x1b[0m", emphasis, color, self.callsign, self.flight_level())
+    }
+} impl ListRenderable for Plane {
+    fn render(&self, command: &Command) -> String {
+        let emphasis = match command {
+            Command { plane: Some(callsign), .. } if callsign.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => COMMAND_TARGET_EMPHASIS,
+            _ => "",
+        };
+        let color = match self.show {
+            DisplayState::Marked => "\x1b[32m",
+            _ => "\x1b[2m",
+        };
+        let airport = match self.location {
+            Location::Flight(_) => format!("   "),
+            Location::Airport(a) => format!("@{}", a.to_display_string(self.show == DisplayState::Marked)),
+        };
+        let command = match (self.show, self.command) {
+            (DisplayState::Ignored, _) => format!("---"),
+            (_, Some(c)) => c.to_short_string(self.show == DisplayState::Marked),
+            _ => String::new(),
+        };
+        format!("{}{}{}{}{COMMAND_TARGET_EMPHASIS_RESET}\x1b[39m{} {}   {}", emphasis, color, self.callsign, self.flight_level(), airport, self.destination, command)
     }
 }
 
@@ -283,61 +311,36 @@ struct Map {
         *pool.choose(&mut rng()).expect("location pool to be non-empty")
     }
     fn render(&self, output: &mut impl Write) -> Result<()> {
-        let mut grid = RenderGrid::new(self.width, self.height);
+        let mut grid = RenderGrid::new(self.width, self.height, self.current_command);
         for mark in &self.path_markers {
-            grid.set_loc(*mark, RenderCell::PathMark);
+            grid.add(mark);
         }
         for exit in &self.exits {
-            grid.set_loc(exit.into(), exit.into());
+            grid.add(exit);
         }
         for beacon in &self.beacons {
-            grid.set_loc(beacon.into(), beacon.into());
+            grid.add(beacon);
         }
         for airport in &self.airports {
-            grid.set_loc(airport.into(), airport.into());
+            grid.add(airport);
         }
         for plane in &self.planes {
-            if let Some(location) = plane.into() {
-                grid.set_loc(location, plane.into());
-            }
+            grid.add(plane);
         }
 
         write!(output, "{}{}", termion::cursor::Goto(1, 1), termion::clear::All)?;
-        grid.render(output, &self.current_command)?;
+        write!(output, "{}", grid.render())?;
         let table_left = self.width * 2 + 2;
         let mut table_top = 3;
         write!(output, "{}Time: {:<4} Score: {:<4}", termion::cursor::Goto(table_left, 1), self.tick_no, self.planes_landed)?;
         write!(output, "{}\x1b[1mplane dest cmd\x1b[0m", termion::cursor::Goto(table_left, 2))?;
         for plane in &self.planes {
-            match plane.show {
-                DisplayState::Marked => {
-                    write!(output, "{}{}", termion::cursor::Goto(table_left, table_top), plane)?;
-                    if let Location::Airport(a) = plane.location {
-                        write!(output, "@{}", <&Airport as Into<RenderCell>>::into(&a))?;
-                    } else {
-                        write!(output, "   ")?;
-                    }
-                    write!(output, " {}", plane.destination)?;
-                    if let Some(cmd) = plane.command {
-                        write!(output, "   {cmd}")?;
-                    }
-                },
-                DisplayState::Unmarked => {
-                    write!(output, "\x1b[2m{}{}    {}", termion::cursor::Goto(table_left, table_top), plane, plane.destination)?;
-                    if let Some(cmd) = plane.command {
-                        write!(output, "   {}", cmd.to_string_uncolored()?)?;
-                    }
-                    write!(output, "\x1b[0m")?;
-                },
-                DisplayState::Ignored => {
-                    write!(output, "\x1b[2m{}{}    {}   --- \x1b[0m", termion::cursor::Goto(table_left, table_top), plane, plane.destination)?;
-                }
-            }
+            write!(output, "{}{}", termion::cursor::Goto(table_left, table_top), <Plane as ListRenderable>::render(plane, &self.current_command))?;
             table_top += 1;
         }
         match self.exit_state {
-            None => write!(output, "{}{}", termion::cursor::Goto(1, self.height + 2), self.current_command)?,
-            Some(msg) => write!(output, "{}{}", termion::cursor::Goto(1, self.height + 2), msg)?,
+            None => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.height + 2), self.current_command)?,
+            Some(msg) => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.height + 2), msg)?,
         }
 
         output.flush()?;

@@ -1,6 +1,6 @@
-use std::{fmt::Display, io::{BufWriter, Write}};
+use std::fmt::Display;
 
-use crate::{direction::OrdinalDirection, DisplayState};
+use crate::{direction::OrdinalDirection, map_objects::Beacon, DisplayState};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RelOrAbsolute {
@@ -75,45 +75,27 @@ pub struct CompleteCommand {
     pub action: CompleteAction,
     pub at: Option<u16>
 } impl CompleteCommand {
-    pub fn to_string_uncolored(&self) -> anyhow::Result<String> {
-        let mut f = BufWriter::new(Vec::new());
-
-        match self.action {
-            CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => write!(f, "alt: {val}")?,
-            CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => write!(f, "alt: +{val}")?,
-            CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => write!(f, "alt: -{val}")?,
-            CompleteAction::Heading(dir) => write!(f, "hdg: {}", dir.to_deg())?,
-            CompleteAction::SetVisiblity(DisplayState::Marked) => write!(f, "mark")?,
-            CompleteAction::SetVisiblity(DisplayState::Unmarked) => write!(f, "unmark")?,
-            CompleteAction::SetVisiblity(DisplayState::Ignored) => write!(f, "ignore")?,
-        }
-        
-        if let Some(b) = self.at {
-            write!(f, " @*{b}")?;
-        }
-
-        Ok(String::from_utf8(f.into_inner().unwrap())?)
-    }
-} impl Display for CompleteCommand {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.action {
-            CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => write!(f, "alt: {val}")?,
-            CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => write!(f, "alt: +{val}")?,
-            CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => write!(f, "alt: -{val}")?,
-            CompleteAction::Heading(dir) => write!(f, "hdg: {}", dir.to_deg())?,
-            CompleteAction::SetVisiblity(DisplayState::Marked) => write!(f, "mark")?,
-            CompleteAction::SetVisiblity(DisplayState::Unmarked) => write!(f, "unmark")?,
-            CompleteAction::SetVisiblity(DisplayState::Ignored) => write!(f, "ignore")?,
-        }
-        
-        if let Some(b) = self.at {
-            write!(f, " @\x1b[33m*{b}\x1b[0m")?;
-        }
-
-        Ok(())
+    pub fn to_short_string(&self, colorize: bool) -> String {
+        format!("{}{}",
+            match self.action {
+                CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => format!("alt: {val}"),
+                CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => format!("alt: +{val}"),
+                CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => format!("alt: -{val}"),
+                CompleteAction::Heading(dir) => format!("hdg: {}", dir.to_deg()),
+                CompleteAction::SetVisiblity(DisplayState::Marked) => format!("mark"),
+                CompleteAction::SetVisiblity(DisplayState::Unmarked) => format!("unmark"),
+                CompleteAction::SetVisiblity(DisplayState::Ignored) => format!("ignore"),
+            },
+            match self.at {
+                Some(b) => format!(" {}", Beacon::to_display_string(&Beacon {
+                    location: crate::location::GroundLocation(0, 0),
+                    index: b,
+                }, colorize)),
+                None => String::new()
+            }
+        )
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Setting<T> {
     #[default]
