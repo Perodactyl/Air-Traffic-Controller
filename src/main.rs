@@ -1,27 +1,17 @@
 use std::{fmt::Display, io::{self, IsTerminal, Read, Write}, time::{Duration, Instant}};
 use clap::Parser;
-use serde::Deserialize;
-use rand::{prelude::*, random, random_range, rng};
 
 use anyhow::Result;
 use termion::{raw::IntoRawMode, screen::IntoAlternateScreen};
 
 mod direction;
-use direction::{CardinalDirection, OrdinalDirection};
-
 mod location;
-use location::{Location, Destination, GroundLocation, AirLocation};
-
 mod map_objects;
-use map_objects::{Airport, Beacon, Exit, ListRenderable, RenderGrid };
-
 mod command;
-use command::{Command, CompleteCommand };
-
 mod plane;
-use plane::{Plane, Visibility};
-
 mod map;
+
+use plane::Visibility;
 use map::Map;
 
 #[derive(Debug, Clone, Copy)]
@@ -38,8 +28,6 @@ pub enum GameStatus {
         }
     }
 }
-
-
 
 #[derive(Parser, Debug)]
 #[command(version, about)]

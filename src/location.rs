@@ -88,6 +88,12 @@ pub enum Destination {
             Destination::Exit(Exit { exit_location: AirLocation(_, _, height), .. }) => *height,
         }
     }
+    pub fn to_display_string(&self, colorize: bool, show_exit_char: bool) -> String {
+        match self {
+            Destination::Airport(a) => a.to_display_string(colorize),
+            Destination::Exit(e) => e.to_display_string(colorize, show_exit_char),
+        }
+    }
 } impl Display for Destination {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

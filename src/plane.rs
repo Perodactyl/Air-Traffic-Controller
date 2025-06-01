@@ -115,6 +115,7 @@ pub struct Plane {
     }
 } impl ListRenderable for Plane {
     fn render(&self, command: &Command) -> String {
+        let colorize = self.show == Visibility::Marked;
         let emphasis = match command {
             Command { plane: Some(callsign), .. } if callsign.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => COMMAND_TARGET_EMPHASIS,
             _ => "",
@@ -125,13 +126,13 @@ pub struct Plane {
         };
         let airport = match self.location {
             Location::Flight(_) => format!("   "),
-            Location::Airport(a) => format!("@{}", a.to_display_string(self.show == Visibility::Marked)),
+            Location::Airport(a) => format!("@{}", a.to_display_string(colorize)),
         };
         let command = match (self.show, self.command) {
             (Visibility::Ignored, _) => format!("---"),
-            (_, Some(c)) => c.to_short_string(self.show == Visibility::Marked),
+            (_, Some(c)) => c.to_short_string(colorize),
             _ => String::new(),
         };
-        format!("{}{}{}{}{COMMAND_TARGET_EMPHASIS_RESET}\x1b[39m{} {}   {}", emphasis, color, self.callsign, self.flight_level(), airport, self.destination, command)
+        format!("\x1b[0m{}{}{}{}{COMMAND_TARGET_EMPHASIS_RESET}\x1b[39m{} {}   {}", emphasis, color, self.callsign, self.flight_level(), airport, self.destination.to_display_string(colorize, true), command)
     }
 }

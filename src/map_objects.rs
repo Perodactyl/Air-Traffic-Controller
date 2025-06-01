@@ -51,12 +51,21 @@ pub struct Exit {
     pub entry_direction: OrdinalDirection,
     pub exit_location: AirLocation,
     pub exit_direction: OrdinalDirection,
+} impl Exit {
+    pub fn to_display_string(&self, colorize: bool, show_char: bool) -> String {
+        match (colorize, show_char) {
+            (false, false) => format!("{} ", self.index),
+            (false, true)  => format!("E{}", self.index),
+            (true, false)  => format!("\x1b[31m{} \x1b[0m", self.index),
+            (true, true)   => format!("\x1b[31mE{}\x1b[0m", self.index),
+        }
+    }
 } impl GridRenderable for Exit {
     fn location(&self) -> Option<GroundLocation> {
         Some(self.entry_location.into())
     }
     fn render(&self, _command: &Command) -> String {
-        format!("\x1b[31m{} \x1b[0m", self.index)
+        self.to_display_string(true, false)
     }
 }
 
