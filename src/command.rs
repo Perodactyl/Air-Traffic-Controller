@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{direction::OrdinalDirection, map_objects::Beacon, DisplayState};
+use crate::{direction::OrdinalDirection, map_objects::Beacon, Visibility};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RelOrAbsolute {
@@ -31,14 +31,14 @@ pub enum CompleteRelOrAbsolute {
 pub enum CompleteAction {
     Altitude(CompleteRelOrAbsolute),
     Heading(OrdinalDirection),
-    SetVisiblity(DisplayState),
+    SetVisiblity(Visibility),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Action {
     Altitude(RelOrAbsolute),
     Heading(Option<OrdinalDirection>),
-    SetVisibility(DisplayState),
+    SetVisibility(Visibility),
 } impl Action {
     pub fn try_complete(&self) -> Option<CompleteAction> {
         match self {
@@ -62,9 +62,9 @@ pub enum Action {
                 Some(dir) => write!(f, "turn to {}", dir.to_deg()),
                 None => write!(f, "turn to"),
             },
-            Action::SetVisibility(DisplayState::Marked) => write!(f, "mark"),
-            Action::SetVisibility(DisplayState::Unmarked) => write!(f, "unmark"),
-            Action::SetVisibility(DisplayState::Ignored) => write!(f, "ignore"),
+            Action::SetVisibility(Visibility::Marked) => write!(f, "mark"),
+            Action::SetVisibility(Visibility::Unmarked) => write!(f, "unmark"),
+            Action::SetVisibility(Visibility::Ignored) => write!(f, "ignore"),
         }
     }
 }
@@ -82,9 +82,9 @@ pub struct CompleteCommand {
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => format!("alt: +{val}"),
                 CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => format!("alt: -{val}"),
                 CompleteAction::Heading(dir) => format!("hdg: {}", dir.to_deg()),
-                CompleteAction::SetVisiblity(DisplayState::Marked) => format!("mark"),
-                CompleteAction::SetVisiblity(DisplayState::Unmarked) => format!("unmark"),
-                CompleteAction::SetVisiblity(DisplayState::Ignored) => format!("ignore"),
+                CompleteAction::SetVisiblity(Visibility::Marked) => format!("mark"),
+                CompleteAction::SetVisiblity(Visibility::Unmarked) => format!("unmark"),
+                CompleteAction::SetVisiblity(Visibility::Ignored) => format!("ignore"),
             },
             match self.at {
                 Some(b) => format!(" {}", Beacon::to_display_string(&Beacon {
@@ -161,9 +161,9 @@ pub struct Command {
                 None => match letter.to_ascii_lowercase() {
                     'a' => self.action = Some(Action::Altitude(RelOrAbsolute::Undefined)),
                     't' | 'h' => self.action = Some(Action::Heading(None)),
-                    'i' => self.action = Some(Action::SetVisibility(DisplayState::Ignored)),
-                    'u' => self.action = Some(Action::SetVisibility(DisplayState::Unmarked)),
-                    'm' => self.action = Some(Action::SetVisibility(DisplayState::Marked)),
+                    'i' => self.action = Some(Action::SetVisibility(Visibility::Ignored)),
+                    'u' => self.action = Some(Action::SetVisibility(Visibility::Unmarked)),
+                    'm' => self.action = Some(Action::SetVisibility(Visibility::Marked)),
                     '\x7f' => self.plane = None,
                     _ => {},
                 },
