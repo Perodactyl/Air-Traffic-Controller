@@ -63,7 +63,7 @@ pub enum RenderCell {
             RenderCell::PathMark => write!(f, "+ "),
             RenderCell::Beacon(no) => write!(f, "\x1b[33m*{no}\x1b[0m"),
             RenderCell::Airport(no, dir) => write!(f, "\x1b[34m{dir}{no}\x1b[0m"),
-            RenderCell::Exit(no) => write!(f, "\x1b[31mE{no}\x1b[0m"),
+            RenderCell::Exit(no) => write!(f, "\x1b[31m{no} \x1b[0m"),
             RenderCell::Airplane(callsign, fl, state) => write!(f, "{state}{callsign}{fl}\x1b[0m"),
         }
     }
