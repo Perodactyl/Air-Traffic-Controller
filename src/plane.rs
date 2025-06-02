@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{command::{Command, CompleteAction, CompleteCommand, CompleteRelOrAbsolute}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map_objects::{GridRenderable, ListRenderable, COMMAND_TARGET_EMPHASIS, COMMAND_TARGET_EMPHASIS_RESET}};
+use crate::{command::{Command, CompleteAltitude, CompleteAnd, CompleteAt, CompleteCommandSegment, CompleteTurn}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map::MapStatic, map_objects::{GridRenderable, ListItemPartRenderable, ListRenderable, COMMAND_TARGET_EMPHASIS, COMMAND_TARGET_EMPHASIS_RESET}};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
@@ -27,48 +27,11 @@ pub struct Plane {
     pub target_direction: OrdinalDirection,
     pub current_direction: OrdinalDirection,
     pub show: Visibility,
-    pub command: Option<CompleteCommand>,
+    pub command: Option<CompleteCommandSegment>,
 } impl Plane {
-    pub fn accept_cmd(&mut self, cmd: CompleteCommand, is_at_beacon: bool) {
-        let CompleteCommand { action, at, .. } = cmd;
-        if at.is_none() || is_at_beacon {
-            match action {
-                CompleteAction::Altitude(CompleteRelOrAbsolute::To(val)) => self.target_flight_level = val,
-                CompleteAction::Altitude(CompleteRelOrAbsolute::Plus(val)) => self.target_flight_level += val,
-                CompleteAction::Altitude(CompleteRelOrAbsolute::Minus(val)) => self.target_flight_level -= val,
-                CompleteAction::Heading(targ) => {
-                    self.target_direction = targ;
-                    if let Some(CompleteCommand { action: CompleteAction::Circle(_), .. }) = self.command {
-                        self.command = None;
-                    }
-                },
-                CompleteAction::Circle(dir) => {
-                    self.target_direction = self.current_direction.rotated_90(dir);
-                    self.command = Some(CompleteCommand {
-                      plane: self.callsign,
-                        action: CompleteAction::Circle(dir),
-                        at: None,
-                    });
-                },
-                CompleteAction::SetVisiblity(v) => self.show = v,
-            }
-            if is_at_beacon {
-                if let Some(c) = self.command {
-                    match c {
-                        CompleteCommand { action: CompleteAction::SetVisiblity(_), .. } => {},
-                        CompleteCommand { action: CompleteAction::Circle(_), .. } => {},
-                        _ => self.command = None,
-                    };
-                }
-            }
-        } else if at.is_some() {
-            self.command = Some(cmd);
-        }
-
-    }
-    pub fn tick(&mut self, is_at_beacon: bool) {
-        if let Some(cmd) = self.command {
-            self.accept_cmd(cmd, is_at_beacon);
+    pub fn tick(&mut self, map: &MapStatic) {
+        if let Some(cmd) = &self.command {
+            self.exec(cmd.clone(), map);
         }
         match self.location {
             Location::Flight(loc) => {
@@ -109,6 +72,42 @@ pub struct Plane {
             Location::Flight(AirLocation(_, _, fl)) => fl,
         }
     }
+    pub fn exec(&mut self, command: CompleteCommandSegment, map: &MapStatic) -> bool {
+        match command {
+            CompleteCommandSegment::SetVisibility(v) => self.show = v.into(),
+            CompleteCommandSegment::Altitude(CompleteAltitude::To(a)) => self.target_flight_level = a,
+            CompleteCommandSegment::Altitude(CompleteAltitude::Plus(a)) => self.target_flight_level += a,
+            CompleteCommandSegment::Altitude(CompleteAltitude::Minus(a)) => self.target_flight_level -= a,
+            CompleteCommandSegment::Turn(CompleteTurn::ToHeading(h)) => {
+                self.target_direction = h;
+                if let Some(CompleteCommandSegment::Circle(_)) = self.command {
+                    self.command = None;
+                }
+            },
+            CompleteCommandSegment::Circle(dir) => {
+                self.target_direction = self.current_direction.rotated_90(dir.into());
+                self.command = Some(command);
+            },
+            CompleteCommandSegment::At(CompleteAt { ref tail, poi }) => {
+                if poi.is_satisfied(self, map) {
+                    self.command = None;
+                    self.exec(*tail.clone(), map);
+                } else {
+                    self.command = Some(command);
+                    return false;
+                }
+            },
+            CompleteCommandSegment::And(CompleteAnd { ref left, ref right }) => {
+                if self.exec(*left.clone(), map) {
+                    self.exec(*right.clone(), map);
+                } else {
+                    self.command = Some(command);
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
 } impl GridRenderable for Plane {
     fn location(&self) -> Option<GroundLocation> {
         match self.location {
@@ -143,9 +142,10 @@ pub struct Plane {
             Location::Flight(_) => format!("   "),
             Location::Airport(a) => format!("@{}", a.to_display_string(colorize)),
         };
-        let command = match (self.show, self.command) {
+        let command = match (self.show, &self.command) {
             (Visibility::Ignored, _) => format!("---"),
-            (_, Some(c)) => c.to_short_string(colorize),
+            (Visibility::Unmarked, Some(c)) => c.render(false),
+            (Visibility::Marked, Some(c)) => c.render(true),
             _ => String::new(),
         };
         format!("\x1b[0m{}{}{}{}{COMMAND_TARGET_EMPHASIS_RESET}\x1b[39m{} {}   {}", emphasis, color, self.callsign, self.flight_level(), airport, self.destination.to_display_string(colorize, true), command)

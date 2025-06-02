@@ -41,6 +41,7 @@ To direct plane, first enter its callsign letter. Capitalization does not matter
 After specifying a command, you can optionally specify a <u>delay</u>:
     - [x] At (`A`) digit: Command will run when the plane arrives at the beacon with a matching ID number.
     - [ ] In (`I`) digit: Command will run after the plane moves *digit* times. Not yet implemented.
+You can also specify additional commands with `;` or `&`. Commands after a delayed command will be held up until the first command in the chain finishes.
 
 ### Example Commands
 | Keystrokes | Action |
@@ -50,5 +51,6 @@ After specifying a command, you can optionally specify a <u>delay</u>:
 | `atw`      | Turn plane A so it moves due north. |
 | `atwa1`, `atw@1` | Turn plane A to the north when it arrives at beacon _*1_. |
 | `au`       | Unmark plane A until it arrives at the beacon. |
+| `ataa1;atxa0` | Turn plane A west when it arrives at beacon _*1_, then turn it south once it arrives at beacon _*0_. |
 
 

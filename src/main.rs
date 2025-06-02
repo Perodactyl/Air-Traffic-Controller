@@ -11,7 +11,6 @@ mod command;
 mod plane;
 mod map;
 
-use plane::Visibility;
 use map::Map;
 
 #[derive(Debug, Clone, Copy)]
@@ -83,19 +82,13 @@ fn main() -> Result<()> {
                 } else if ch == '\x1b' {
                     map.current_command.reset();
                 } else if ch == '\n' || ch == '\r' {
-                    if let Some(cmd) = map.current_command.try_complete() {
-                        for plane in &mut map.planes {
-                            if plane.callsign.to_ascii_lowercase() == cmd.plane.to_ascii_lowercase() {
-                                plane.accept_cmd(cmd, false);
-                                break;
-                            }
-                        }
-                        map.current_command.reset();
-                    }
                     if map.current_command.is_empty() {
                         last_tick = Instant::now();
                         map.tick();
                         is_dirty = true;
+                    } else if let Some(c) = map.current_command.to_complete() {
+                        map.exec(c);
+                        map.current_command.reset();
                     }
                 } else {
                     map.current_command.input(ch);

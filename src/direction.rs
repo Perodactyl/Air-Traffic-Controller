@@ -2,7 +2,12 @@ use std::fmt::Display;
 
 use serde::Deserialize;
 
-use crate::command::CircleDirection;
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum CircleDirection {
+    #[default]
+    Clockwise,
+    CounterClockwise
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "lowercase")]

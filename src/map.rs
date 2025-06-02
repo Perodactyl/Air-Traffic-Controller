@@ -5,6 +5,16 @@ use serde::Deserialize;
 use tabled::Tabled;
 use rand::{random, random_range, rng, prelude::*};
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct MapStatic {
+    pub width: u16,
+    pub height: u16,
+    pub exits: Vec<Exit>,
+    pub beacons: Vec<Beacon>,
+    pub airports: Vec<Airport>,
+    pub path_markers: Vec<GroundLocation>,
+}
+
 #[derive(Debug, Clone, Deserialize, Tabled)]
 pub struct Map {
     #[tabled(rename = "Map")]
@@ -13,21 +23,10 @@ pub struct Map {
     author: String,
 
     #[tabled(skip)]
-    width: u16,
-    #[tabled(skip)]
-    height: u16,
-    #[tabled(skip)]
+    #[serde(flatten)]
+    info: MapStatic,
     #[serde(skip)]
     pub current_command: Command,
-
-    #[tabled(skip)]
-    exits: Vec<Exit>,
-    #[tabled(skip)]
-    beacons: Vec<Beacon>,
-    #[tabled(skip)]
-    airports: Vec<Airport>,
-    #[tabled(skip)]
-    path_markers: Vec<GroundLocation>,
 
     #[tabled(skip)]
     #[serde(skip)]
@@ -47,24 +46,12 @@ pub struct Map {
 
         let mut planes_to_remove = vec![];
         for (i, plane) in self.planes.iter_mut().enumerate() {
-            let mut is_at_beacon = false;
-            if let Some(CompleteCommand { at: Some(at), .. }) = plane.command {
-                for beacon in &self.beacons {
-                    if beacon.index == at && beacon.location == plane.location.into() {
-                        is_at_beacon = true;
-                        if plane.show == Visibility::Unmarked {
-                            plane.show = Visibility::Marked;
-                        }
-                        break
-                    };
-                }
-            }
-            plane.tick(is_at_beacon);
+            plane.tick(&self.info);
             if let Location::Flight(loc) = plane.location {
                 let AirLocation(x, y, level) = loc;
                 if level == 0 {
                     let mut success = false;
-                    for airport in &self.airports {
+                    for airport in &self.info.airports {
                         if airport.location == GroundLocation(x, y) {
                             if <CardinalDirection as Into<OrdinalDirection>>::into(airport.launch_direction) == plane.current_direction {
                                 success = true;
@@ -79,14 +66,14 @@ pub struct Map {
                     }
                 } else {
                     let mut exited_correctly = false;
-                    for exit in &self.exits {
+                    for exit in &self.info.exits {
                         if exit.exit_location == loc && exit.exit_direction == plane.current_direction {
                             planes_to_remove.push(i);
                             exited_correctly = true;
                             break;
                         }
                     }
-                    if !exited_correctly && (x == 0 || x == self.width-1 || y == 0 || y == self.height-1) {
+                    if !exited_correctly && (x == 0 || x == self.info.width-1 || y == 0 || y == self.info.height-1) {
                         self.exit_state = Some(GameStatus::PlaneExited(plane.callsign));
                     }
                 }
@@ -145,12 +132,12 @@ pub struct Map {
             current_direction: start.entry_dir(),
             target_direction: start.entry_dir(),
             show: Visibility::Marked,
-            command: Default::default(),
+            command: None,
         });
     }
     fn generate_location(&self, exclude: Option<Destination>) -> Destination {
         let mut pool = vec![];
-        for exit in &self.exits {
+        for exit in &self.info.exits {
             let candidate = Destination::Exit(*exit);
             if let Some(exclude) = exclude {
                 if candidate == exclude {
@@ -159,7 +146,7 @@ pub struct Map {
             }
             pool.push(candidate);
         }
-        for airport in &self.airports {
+        for airport in &self.info.airports {
             let candidate = Destination::Airport(*airport);
             if let Some(exclude) = exclude {
                 if candidate == exclude {
@@ -171,18 +158,28 @@ pub struct Map {
 
         *pool.choose(&mut rng()).expect("location pool to be non-empty")
     }
+    pub fn exec(&mut self, command: CompleteCommand) {
+        eprintln!("{command:?}");
+        for plane in &mut self.planes {
+            if plane.callsign.to_ascii_lowercase() == command.plane.to_ascii_lowercase() {
+                plane.exec(command.head, &self.info);
+                return;
+            }
+        }
+        eprintln!("Plane {} not found.", command.plane);
+    }
     pub fn render(&self, output: &mut impl Write) -> Result<()> {
-        let mut grid = RenderGrid::new(self.width, self.height, self.current_command);
-        for mark in &self.path_markers {
+        let mut grid = RenderGrid::new(self.info.width, self.info.height, &self.current_command);
+        for mark in &self.info.path_markers {
             grid.add(mark);
         }
-        for exit in &self.exits {
+        for exit in &self.info.exits {
             grid.add(exit);
         }
-        for beacon in &self.beacons {
+        for beacon in &self.info.beacons {
             grid.add(beacon);
         }
-        for airport in &self.airports {
+        for airport in &self.info.airports {
             grid.add(airport);
         }
         for plane in &self.planes {
@@ -191,7 +188,7 @@ pub struct Map {
 
         write!(output, "{}{}", termion::cursor::Goto(1, 1), termion::clear::All)?;
         write!(output, "{}", grid.render())?;
-        let table_left = self.width * 2 + 2;
+        let table_left = self.info.width * 2 + 2;
         let mut table_top = 3;
         write!(output, "{}Time: {:<4} Score: {:<4}", termion::cursor::Goto(table_left, 1), self.tick_no, self.planes_landed)?;
         write!(output, "{}\x1b[1mplane dest cmd\x1b[0m", termion::cursor::Goto(table_left, 2))?;
@@ -200,8 +197,8 @@ pub struct Map {
             table_top += 1;
         }
         match self.exit_state {
-            None => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.height + 2), self.current_command)?,
-            Some(msg) => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.height + 2), msg)?,
+            None => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.info.height + 2), self.current_command)?,
+            Some(msg) => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.info.height + 2), msg)?,
         }
 
         output.flush()?;
