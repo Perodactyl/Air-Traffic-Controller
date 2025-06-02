@@ -33,7 +33,7 @@ To direct plane, first enter its callsign letter. Capitalization does not matter
     - [ ] `T`: Turn **T**oward an object on the radar. Not yet implemented.
 - [x] Circle (`C`): Causes the plane to move in a 4-space pattern until otherwise commanded with a new heading. Use this if you do not have time to handle a plane or if it needs to finish changing altitudes before continuing. Next arguments:
     - [x] Clockwise (`Q` or `[`) & Counter-Clockwise (`E` or `]`): Specifies the direction the plane will circle in. If unspecified, the default is clockwise.
-    - [x] Digit: Sets the number of cycles before the plane will continue. Not yet implemented.
+    - [ ] Digit: Sets the number of cycles before the plane will continue. Not yet implemented.
 - [x] Set visibility (`U`, `M`, and `I`): Changes the visibility of the current plane:
     - [x] Unmark (`U`): Dims the plane from view until it reaches a site where it has a delayed action. Use this if a plane has an instruction, but will later need more before it can reach its destination.
     - [x] Mark (`M`): Undoes an Unmark or Ignore command.
@@ -45,10 +45,10 @@ After specifying a command, you can optionally specify a <u>delay</u>:
 ### Example Commands
 | Keystrokes | Action |
 | :--------- | -----: |
-| `aa9`      | Send plane A to flight level 9 (9000ft) |
+| `aa9`      | Send plane A to flight level 9 (9000ft). |
 | `aa=2`, `aa+2` | Send plane A 2 flight levels higher. |
 | `atw`      | Turn plane A so it moves due north. |
-| `atwa1`, `atw@1` | Turn plane A to the north when it arrives at beacon _*1_ |
+| `atwa1`, `atw@1` | Turn plane A to the north when it arrives at beacon _*1_. |
 | `au`       | Unmark plane A until it arrives at the beacon. |
 
 
