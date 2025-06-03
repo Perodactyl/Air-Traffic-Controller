@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{command::Command, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, GroundLocation}};
+use crate::{command::{Command, PointOfInterest}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, GroundLocation}};
 
 pub const COMMAND_TARGET_EMPHASIS: &str = "\x1b[4m";
 pub const COMMAND_TARGET_EMPHASIS_RESET: &str = "\x1b[24m";
@@ -36,7 +36,8 @@ pub struct Beacon {
         Some(self.location)
     }
     fn render(&self, command: &Command) -> String {
-        let emphasis = match command {
+        let emphasis = match command.current_segment().target() {
+            Some(PointOfInterest::Beacon(Some(b)) | PointOfInterest::Default(b)) if b == self.index => COMMAND_TARGET_EMPHASIS,
             _ => "",
         };
         format!("{}{}{COMMAND_TARGET_EMPHASIS_RESET}", emphasis, self.to_display_string(true))

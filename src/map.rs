@@ -1,46 +1,51 @@
-use crate::{command::{Command, CompleteCommand}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map_objects::{Airport, Beacon, Exit, ListRenderable, RenderGrid}, plane::{Plane, Visibility}, GameStatus};
+use crate::{command::{Command, CompleteAnd, CompleteAt, CompleteCommand, CompleteCommandSegment, CompleteCommandTarget, CompleteIn, CompleteRef}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map_objects::{Airport, Beacon, Exit, ListItemPartRenderable, ListRenderable, RenderGrid}, plane::{Plane, Visibility}, GameSettings, GameStatus};
 use anyhow::Result;
-use std::io::Write;
+use std::{collections::HashMap, io::Write};
 use serde::Deserialize;
 use tabled::Tabled;
 use rand::{random, random_range, rng, prelude::*};
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Tabled)]
 pub struct MapStatic {
+    #[tabled(rename = "Map")]
+    pub name: String,
+    #[tabled(rename = "Author")]
+    pub author: String,
     pub width: u16,
     pub height: u16,
+    #[tabled(skip)]
     pub exits: Vec<Exit>,
+    #[tabled(skip)]
     pub beacons: Vec<Beacon>,
+    #[tabled(skip)]
     pub airports: Vec<Airport>,
+    #[tabled(skip)]
     pub path_markers: Vec<GroundLocation>,
 }
 
-#[derive(Debug, Clone, Deserialize, Tabled)]
+#[derive(Debug, Clone)]
 pub struct Map {
-    #[tabled(rename = "Map")]
-    name: String,
-    #[tabled(rename = "Author")]
-    author: String,
-
-    #[tabled(skip)]
-    #[serde(flatten)]
     info: MapStatic,
-    #[serde(skip)]
+    settings: GameSettings,
     pub current_command: Command,
-
-    #[tabled(skip)]
-    #[serde(skip)]
     pub planes: Vec<Plane>,
-    #[tabled(skip)]
-    #[serde(skip)]
     exit_state: Option<GameStatus>,
-    #[tabled(skip)]
-    #[serde(skip)]
     tick_no: u32,
-    #[tabled(skip)]
-    #[serde(skip)]
     planes_landed: u32,
+    command_slots: HashMap<u16, CompleteCommand>,
 } impl Map {
+    pub fn new(settings: GameSettings, data: MapStatic) -> Self {
+        Map {
+            info: data,
+            settings,
+            current_command: Default::default(),
+            planes: vec![],
+            exit_state: None,
+            tick_no: 0,
+            planes_landed: 0,
+            command_slots: HashMap::new(),
+        }
+    }
     pub fn tick(&mut self) {
         if self.exit_state.is_some() { return; }
 
@@ -101,17 +106,17 @@ pub struct Map {
             self.planes.remove(plane - j);
             self.planes_landed += 1;
         }
-        if self.tick_no % 30 == 0 {
+        if self.tick_no % self.settings.plane_spawn_rate == 0 {
             self.generate_plane();
         }
         self.tick_no += 1;
     }
     fn generate_plane(&mut self) {
-        if self.planes.len() == 26 {
+        if self.planes.len() >= 26 {
             return;
         }
-        let start = self.generate_location(None);
-        let finish = self.generate_location(Some(start));
+        let start = self.generate_location(None, false);
+        let finish = self.generate_location(Some(start), true);
         let is_jet = random();
         let callsign = 'generate: loop {
             let c = random_range(if is_jet { b'a' ..= b'z' } else { b'A' ..= b'Z' }) as char;
@@ -135,7 +140,7 @@ pub struct Map {
             command: None,
         });
     }
-    fn generate_location(&self, exclude: Option<Destination>) -> Destination {
+    fn generate_location(&self, exclude: Option<Destination>, is_dest: bool) -> Destination {
         let mut pool = vec![];
         for exit in &self.info.exits {
             let candidate = Destination::Exit(*exit);
@@ -146,7 +151,7 @@ pub struct Map {
             }
             pool.push(candidate);
         }
-        for airport in &self.info.airports {
+        if !is_dest || self.settings.allow_landing { for airport in &self.info.airports {
             let candidate = Destination::Airport(*airport);
             if let Some(exclude) = exclude {
                 if candidate == exclude {
@@ -154,19 +159,46 @@ pub struct Map {
                 }
             }
             pool.push(candidate);
-        }
+        } }
 
         *pool.choose(&mut rng()).expect("location pool to be non-empty")
     }
-    pub fn exec(&mut self, command: CompleteCommand) {
+    ///Searches a command and replaces references with command slots.
+    fn traverse_command(&self, command: &mut CompleteCommandSegment) {
+        match command {
+            CompleteCommandSegment::In(CompleteIn { tail, .. }) => self.traverse_command(tail),
+            CompleteCommandSegment::At(CompleteAt { tail, .. }) => self.traverse_command(tail),
+            CompleteCommandSegment::And(CompleteAnd { left, right }) => {
+                self.traverse_command(left);
+                self.traverse_command(right);
+            },
+            CompleteCommandSegment::Ref(CompleteRef(ref r)) => {
+                if let Some(c) = self.command_slots.get(r) {
+                    *command = c.head.clone();
+                } else {
+                    *command = CompleteCommandSegment::None;
+                }
+            },
+            _ => {},
+        }
+    }
+    pub fn exec(&mut self, mut command: CompleteCommand) {
+        self.traverse_command(&mut command.head);
         eprintln!("{command:?}");
-        for plane in &mut self.planes {
-            if plane.callsign.to_ascii_lowercase() == command.plane.to_ascii_lowercase() {
-                plane.exec(command.head, &self.info);
-                return;
+        match command.target {
+            CompleteCommandTarget::Plane(p) => {
+                for plane in &mut self.planes {
+                    if plane.callsign.to_ascii_lowercase() == p.to_ascii_lowercase() {
+                        plane.exec(command.head, &self.info);
+                        return;
+                    }
+                }
+                eprintln!("Plane {p} not found.");
+            },
+            CompleteCommandTarget::Slot(s) => {
+                self.command_slots.insert(s, command);
             }
         }
-        eprintln!("Plane {} not found.", command.plane);
     }
     pub fn render(&self, output: &mut impl Write) -> Result<()> {
         let mut grid = RenderGrid::new(self.info.width, self.info.height, &self.current_command);
@@ -199,6 +231,16 @@ pub struct Map {
         match self.exit_state {
             None => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.info.height + 2), self.current_command)?,
             Some(msg) => write!(output, "{}\x1b[0m{}", termion::cursor::Goto(1, self.info.height + 2), msg)?,
+        }
+
+        let mut slot_top = self.info.height + 4;
+        let mut sorted_slots = self.command_slots.iter()
+            .collect::<Vec<(&u16, &CompleteCommand)>>();
+        sorted_slots.sort_by(|a, b| u16::cmp(a.0, b.0));
+
+        for (_, command) in sorted_slots {
+            write!(output, "{}{}{}", termion::cursor::Goto(1, slot_top), command.target.as_text(), command.render(true))?;
+            slot_top += 1;
         }
 
         output.flush()?;

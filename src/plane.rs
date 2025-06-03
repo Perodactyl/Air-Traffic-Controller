@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::{command::{Command, CompleteAltitude, CompleteAnd, CompleteAt, CompleteCommandSegment, CompleteTurn}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map::MapStatic, map_objects::{GridRenderable, ListItemPartRenderable, ListRenderable, COMMAND_TARGET_EMPHASIS, COMMAND_TARGET_EMPHASIS_RESET}};
+use crate::{command::{Command, CommandTarget, CompleteAltitude, CompleteAnd, CompleteAt, CompleteCommandSegment, CompleteIn, CompleteTurn}, direction::{CardinalDirection, OrdinalDirection}, location::{AirLocation, Destination, GroundLocation, Location}, map::MapStatic, map_objects::{GridRenderable, ListItemPartRenderable, ListRenderable, COMMAND_TARGET_EMPHASIS, COMMAND_TARGET_EMPHASIS_RESET}};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Visibility {
@@ -72,7 +72,7 @@ pub struct Plane {
             Location::Flight(AirLocation(_, _, fl)) => fl,
         }
     }
-    pub fn exec(&mut self, command: CompleteCommandSegment, map: &MapStatic) -> bool {
+    pub fn exec(&mut self, mut command: CompleteCommandSegment, map: &MapStatic) -> bool {
         match command {
             CompleteCommandSegment::SetVisibility(v) => self.show = v.into(),
             CompleteCommandSegment::Altitude(CompleteAltitude::To(a)) => self.target_flight_level = a,
@@ -104,7 +104,18 @@ pub struct Plane {
                     self.command = Some(command);
                     return false;
                 }
-            }
+            },
+            CompleteCommandSegment::In(CompleteIn { ref tail, ref mut time }) => {
+                if *time > 0 {
+                    *time -= 1;
+                    self.command = Some(command);
+                } else {
+                    self.command = None;
+                    self.exec(*tail.clone(), map);
+                }
+            },
+            CompleteCommandSegment::None => {},
+            CompleteCommandSegment::Ref(_) => unreachable!("map should have cast this to its inner value"),
         }
         return true;
     }
@@ -116,23 +127,23 @@ pub struct Plane {
         }
     }
     fn render(&self, command: &Command) -> String {
-        let emphasis = match command {
-            Command { plane: Some(callsign), .. } if callsign.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => COMMAND_TARGET_EMPHASIS,
-            _ => "",
+        let emphasis = match command.target {
+            CommandTarget::Plane(p) if p.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => format!("{COMMAND_TARGET_EMPHASIS}"),
+            _ => String::new(),
         };
         let color = match self.show {
             Visibility::Marked => "\x1b[32m",
             _ => "\x1b[2m",
         };
 
-        format!("{}{}{}{}\x1b[0m", emphasis, color, self.callsign, self.flight_level())
+        format!("{}{}{}{}{COMMAND_TARGET_EMPHASIS_RESET}\x1b[39m\x1b[22m", emphasis, color, self.callsign, self.flight_level())
     }
 } impl ListRenderable for Plane {
     fn render(&self, command: &Command) -> String {
         let colorize = self.show == Visibility::Marked;
-        let emphasis = match command {
-            Command { plane: Some(callsign), .. } if callsign.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => COMMAND_TARGET_EMPHASIS,
-            _ => "",
+        let emphasis = match command.target {
+            CommandTarget::Plane(p) if p.to_ascii_lowercase() == self.callsign.to_ascii_lowercase() => format!("{COMMAND_TARGET_EMPHASIS}"),
+            _ => String::new(),
         };
         let color = match self.show {
             Visibility::Marked => "\x1b[32m",

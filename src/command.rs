@@ -244,9 +244,9 @@ pub enum PointOfInterest {
     }
     fn as_text(&self) -> String {
         match self {
-            PointOfInterest::Beacon(None) => format!("beacon"),
-            PointOfInterest::Beacon(Some(n)) => format!("beacon {n}"),
-            PointOfInterest::Default(n) => format!("beacon {n}"),
+            PointOfInterest::Beacon(None) => format!("\x1b[33m*\x1b[39m"),
+            PointOfInterest::Beacon(Some(n)) => format!("\x1b[33m*{n}\x1b[39m"),
+            PointOfInterest::Default(n) => format!("\x1b[33m*{n}\x1b[39m"),
         }
     }
     fn to_complete(&self) -> Option<CompletePointOfInterest> {
@@ -337,6 +337,50 @@ pub struct CompleteAt {
 }
 
 #[derive(Debug, Clone)]
+pub struct In {
+    pub tail: Box<CommandSegment>,
+    pub time: Option<u16>,
+} impl CommandFragment<CompleteIn> for In {
+    fn input(&mut self, letter: char) -> InputHandling {
+        match (self.time, letter) {
+            (None, '\x7f') => return InputHandling::Back,
+            (None, '0'..='9') => self.time = Some(digit_as_num(letter)),
+            _ => return InputHandling::Unhandled,
+        }
+
+        InputHandling::Handled
+    }
+    fn as_text(&self) -> String {
+        match self.time {
+            None => format!("{} in \x1b[36m#\x1b[39m ticks", self.tail.as_text()),
+            Some(t) => format!("{} in \x1b[36m#{t}\x1b[39m ticks", self.tail.as_text()),
+        }
+    }
+    fn to_complete(&self) -> Option<CompleteIn> {
+        let Some(delay) = self.time else { return None };
+        let Some(tail) = self.tail.to_complete() else { return None };
+        Some(CompleteIn {
+            tail: Box::new(tail),
+            time: delay,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteIn {
+    pub tail: Box<CompleteCommandSegment>,
+    pub time: u16,
+} impl ListItemPartRenderable for CompleteIn {
+    fn render(&self, colorize: bool) -> String {
+        if colorize {
+            format!("{}\x1b[36m#{}\x1b[39m", self.tail.render(true), self.time)
+        } else {
+            format!("{}#{}", self.tail.render(false), self.time)
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct And {
     left: Box<CommandSegment>,
     right: Box<CommandSegment>,
@@ -369,6 +413,42 @@ pub struct CompleteAnd {
 }
 
 #[derive(Debug, Clone, Default)]
+pub struct Ref(Option<u16>);
+impl CommandFragment<CompleteRef> for Ref {
+    fn input(&mut self, letter: char) -> InputHandling {
+        match (self.0, letter) {
+            (None, '\x7f') => return InputHandling::Back,
+            (Some(_), '\x7f') => self.0 = None,
+            (None, '0'..='9') => self.0 = Some(digit_as_num(letter)),
+            _ => return InputHandling::Unhandled,
+        }
+
+        InputHandling::Handled
+    }
+    fn as_text(&self) -> String {
+        match self.0 {
+            None => format!("\x1b[34m%\x1b[39m"),
+            Some(n) => format!("\x1b[34m%{n}\x1b[39m"),
+        }
+    }
+    fn to_complete(&self) -> Option<CompleteRef> {
+        self.0.map(CompleteRef)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CompleteRef(pub u16);
+impl ListItemPartRenderable for CompleteRef {
+    fn render(&self, colorize: bool) -> String {
+        if colorize {
+            format!("\x1b[34m%{}\x1b[39m", self.0)
+        } else {
+            format!("%{}", self.0)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub enum CommandSegment {
     #[default]
     None,
@@ -378,6 +458,21 @@ pub enum CommandSegment {
     SetVisibility(SetVisibility),
     At(At),
     And(And),
+    In(In),
+    Ref(Ref),
+} impl CommandSegment {
+    pub fn current_segment(&self) -> CommandSegment {
+        match self {
+            CommandSegment::And(And { right, .. }) => right.current_segment(),
+            _ => self.clone(),
+        }
+    }
+    pub fn target(&self) -> Option<PointOfInterest> {
+        match self.current_segment() {
+            CommandSegment::At(At { poi: Some(p), .. }) => Some(p.clone()),
+            _ => None,
+        }
+    }
 } impl Display for CommandSegment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_text())
@@ -391,6 +486,7 @@ pub enum CommandSegment {
                     'a' => *self = CommandSegment::Altitude(Altitude::default()),
                     't' => *self = CommandSegment::Turn(Turn::default()),
                     'c' => *self = CommandSegment::Circle(Circle::default()),
+                    '%' => *self = CommandSegment::Ref(Ref::default()),
 
                     'm' => *self = CommandSegment::SetVisibility(SetVisibility::Mark),
                     'u' => *self = CommandSegment::SetVisibility(SetVisibility::Unmark),
@@ -405,27 +501,41 @@ pub enum CommandSegment {
             CommandSegment::Circle(c) => c.input(letter),
             CommandSegment::SetVisibility(v) => v.input(letter),
             CommandSegment::At(a) => a.input(letter),
-            CommandSegment::And(a) => a.input(letter)
+            CommandSegment::And(a) => a.input(letter),
+            CommandSegment::In(i) => i.input(letter),
+            CommandSegment::Ref(r) => r.input(letter),
         };
 
         match response {
             InputHandling::Unhandled => {
-                match letter {
-                    'a' | '@' => {
-                        *self = CommandSegment::At(At {
-                            tail: Box::new(self.clone()),
-                            poi: None,
-                        });
-                        InputHandling::Handled
-                    },
-                    '&' | ';' => {
-                        *self = CommandSegment::And(And {
-                            left: Box::new(self.clone()),
-                            right: Box::new(CommandSegment::None),
-                        });
-                        InputHandling::Handled
+                match self {
+                    CommandSegment::And(a) if a.to_complete().is_none() => InputHandling::Unhandled,
+                    CommandSegment::At(a) if a.to_complete().is_none()  => InputHandling::Unhandled,
+                    CommandSegment::In(i) if i.to_complete().is_none()  => InputHandling::Unhandled,
+                    _ => match letter {
+                        'a' | '@' => {
+                            *self = CommandSegment::At(At {
+                                tail: Box::new(self.clone()),
+                                poi: None,
+                            });
+                            InputHandling::Handled
+                        },
+                        '&' | ';' => {
+                            *self = CommandSegment::And(And {
+                                left: Box::new(self.clone()),
+                                right: Box::new(CommandSegment::None),
+                            });
+                            InputHandling::Handled
+                        },
+                        '#' | 'i' => {
+                            *self = CommandSegment::In(In {
+                                tail: Box::new(self.clone()),
+                                time: None,
+                            });
+                            InputHandling::Handled
+                        }
+                        _ => InputHandling::Unhandled,
                     }
-                    _ => InputHandling::Unhandled,
                 }
             },
             InputHandling::Handled   => InputHandling::Handled,
@@ -437,7 +547,11 @@ pub enum CommandSegment {
                 CommandSegment::And(a) => {
                     *self = *a.left.clone();
                     InputHandling::Handled
-                }
+                },
+                CommandSegment::In(i) => {
+                    *self = *i.tail.clone();
+                    InputHandling::Handled
+                },
                 _ => {
                     *self = CommandSegment::None;
                     InputHandling::Handled
@@ -454,6 +568,8 @@ pub enum CommandSegment {
             CommandSegment::SetVisibility(v) => v.as_text(),
             CommandSegment::At(a) => a.as_text(),
             CommandSegment::And(a) => a.as_text(),
+            CommandSegment::In(i) => i.as_text(),
+            CommandSegment::Ref(r) => r.as_text(),
         }
     }
     fn to_complete(&self) -> Option<CompleteCommandSegment> {
@@ -464,6 +580,8 @@ pub enum CommandSegment {
             CommandSegment::SetVisibility(v) => Some(CompleteCommandSegment::SetVisibility(*v)),
             CommandSegment::At(a) => a.to_complete().map(CompleteCommandSegment::At),
             CommandSegment::And(a) => a.to_complete().map(CompleteCommandSegment::And),
+            CommandSegment::In(i) => i.to_complete().map(CompleteCommandSegment::In),
+            CommandSegment::Ref(r) => r.to_complete().map(CompleteCommandSegment::Ref),
             _ => None,
         }
     }
@@ -477,6 +595,9 @@ pub enum CompleteCommandSegment {
     SetVisibility(SetVisibility),
     At(CompleteAt),
     And(CompleteAnd),
+    In(CompleteIn),
+    Ref(CompleteRef),
+    None,
 } impl ListItemPartRenderable for CompleteCommandSegment {
     fn render(&self, colorize: bool) -> String {
         match self {
@@ -486,59 +607,116 @@ pub enum CompleteCommandSegment {
             CompleteCommandSegment::SetVisibility(v) => v.render(colorize),
             CompleteCommandSegment::At(a) => a.render(colorize),
             CompleteCommandSegment::And(a) => a.render(colorize),
+            CompleteCommandSegment::In(i) => i.render(colorize),
+            CompleteCommandSegment::Ref(r) => r.render(colorize),
+            CompleteCommandSegment::None => if colorize { String::from("\x1b[41m[]\x1b[49m") } else { String::from("[]") },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum CommandTarget {
+    #[default]
+    None,
+    Plane(char),
+    Slot(Option<u16>),
+} impl CommandFragment<CompleteCommandTarget> for CommandTarget {
+    fn input(&mut self, letter: char) -> InputHandling {
+        match (&self, letter) {
+            (CommandTarget::None, '\x7f') => return InputHandling::Back,
+            (CommandTarget::Plane(_), '\x7f') => *self = CommandTarget::None,
+            (CommandTarget::Slot(None), '\x7f') => *self = CommandTarget::None,
+            (CommandTarget::Slot(Some(_)), '\x7f') => *self = CommandTarget::Slot(None),
+
+            (CommandTarget::None, 'a'..='z' | 'A'..='Z') => *self = CommandTarget::Plane(letter),
+            (CommandTarget::None, '%') => *self = CommandTarget::Slot(None),
+            (CommandTarget::Slot(None), '0'..='9') => *self = CommandTarget::Slot(Some(digit_as_num(letter))),
+            _ => return InputHandling::Unhandled,
+        }
+
+        InputHandling::Handled
+    }
+    fn as_text(&self) -> String {
+        match self {
+            CommandTarget::None => String::new(),
+            CommandTarget::Plane(c) => format!("\x1b[32m{c}\x1b[39m: "),
+            CommandTarget::Slot(None) => format!("\x1b[34m%\x1b[39m"),
+            CommandTarget::Slot(Some(n)) => format!("\x1b[34m%{n}\x1b[39m: "),
+        }
+    }
+    fn to_complete(&self) -> Option<CompleteCommandTarget> {
+        match self {
+            CommandTarget::Plane(c) => Some(CompleteCommandTarget::Plane(*c)),
+            CommandTarget::Slot(Some(n)) => Some(CompleteCommandTarget::Slot(*n)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CompleteCommandTarget {
+    Plane(char),
+    Slot(u16),
+} impl CompleteCommandTarget {
+    pub fn as_text(self) -> String {
+        let incomplete: CommandTarget = self.into();
+        incomplete.as_text()
+    }
+} impl Into<CommandTarget> for CompleteCommandTarget {
+    fn into(self) -> CommandTarget {
+        match self {
+            CompleteCommandTarget::Plane(p) => CommandTarget::Plane(p),
+            CompleteCommandTarget::Slot(s)  => CommandTarget::Slot(Some(s)),
         }
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Command {
-    pub plane: Option<char>,
+    pub target: CommandTarget,
     pub head: CommandSegment,
 } impl Command {
     pub fn reset(&mut self) {
         *self = Default::default();
     }
     pub fn is_empty(&self) -> bool {
-        self.plane.is_none()
+        self.target == CommandTarget::None
     }
     pub fn input(&mut self, letter: char) {
-        if self.plane.is_none() {
-            if ('a'..='z').contains(&letter) || ('A'..='Z').contains(&letter) {
-                self.plane = Some(letter);
-            }
-        } else {
-            match self.head.input(letter) {
+        match self.target.to_complete() {
+            None => { self.target.input(letter); },
+            Some(_) => match self.head.input(letter) {
                 InputHandling::Handled => {},
                 InputHandling::Unhandled => {
                     eprintln!("Input {letter:?} returned InputHandling::Unhandled on {:?}", self.head);
                 },
                 InputHandling::Back => {
-                    self.plane = None;
-                }
-            }
+                    self.target.input('\x7f');
+                },
+            },
         }
     }
     pub fn to_complete(&mut self) -> Option<CompleteCommand> {
-        match self {
-            Command { plane: Some(plane), head } => head.to_complete().map(|head| CompleteCommand {
-                plane: *plane, head
-            }),
-            _ => None
-        }
+        let Some(target) = self.target.to_complete() else { return None };
+        let Some(command) = self.head.to_complete() else { return None };
+        Some(CompleteCommand {
+            target, head: command,
+        })
+    }
+    pub fn current_segment(&self) -> CommandSegment {
+        self.head.current_segment()
     }
 } impl Display for Command {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(p) = self.plane {
-            write!(f, "{}: ", p)?;
-            write!(f, "{}", self.head)?;
-        }
+        write!(f, "{}", self.target.as_text())?;
+        write!(f, "{}", self.head.as_text())?;
         Ok(())
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct CompleteCommand {
-    pub plane: char,
+    pub target: CompleteCommandTarget,
     pub head: CompleteCommandSegment,
 } impl ListItemPartRenderable for CompleteCommand {
     fn render(&self, colorize: bool) -> String {
