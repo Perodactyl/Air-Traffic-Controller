@@ -91,6 +91,7 @@ pub struct Plane {
             CompleteCommandSegment::At(CompleteAt { ref tail, poi }) => {
                 if poi.is_satisfied(self, map) {
                     self.command = None;
+                    if self.show == Visibility::Unmarked { self.show = Visibility::Marked };
                     self.exec(*tail.clone(), map);
                 } else {
                     self.command = Some(command);
@@ -111,6 +112,7 @@ pub struct Plane {
                     self.command = Some(command);
                 } else {
                     self.command = None;
+                    if self.show == Visibility::Unmarked { self.show = Visibility::Marked };
                     self.exec(*tail.clone(), map);
                 }
             },
