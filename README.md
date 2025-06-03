@@ -33,24 +33,27 @@ To direct plane, first enter its callsign letter. Capitalization does not matter
     - [ ] `T`: Turn **T**oward an object on the radar. Not yet implemented.
 - [x] Circle (`C`): Causes the plane to move in a 4-space pattern until otherwise commanded with a new heading. Use this if you do not have time to handle a plane or if it needs to finish changing altitudes before continuing. Next arguments:
     - [x] Clockwise (`Q` or `[`) & Counter-Clockwise (`E` or `]`): Specifies the direction the plane will circle in. If unspecified, the default is clockwise.
-    - [ ] Digit: Sets the number of cycles before the plane will continue. Not yet implemented.
 - [x] Set visibility (`U`, `M`, and `I`): Changes the visibility of the current plane:
     - [x] Unmark (`U`): Dims the plane from view until it reaches a site where it has a delayed action. Use this if a plane has an instruction, but will later need more before it can reach its destination.
     - [x] Mark (`M`): Undoes an Unmark or Ignore command.
     - [x] Ignore (`I`): Dims the plane from view. Use this if a plane will safely reach its destination on its own.
 After specifying a command, you can optionally specify a <u>delay</u>:
     - [x] At (`A`) digit: Command will run when the plane arrives at the beacon with a matching ID number.
-    - [ ] In (`I`) digit: Command will run after the plane moves *digit* times. Not yet implemented.
+    - [x] In (`I`, `#`) digit: Command will run after the plane moves *digit* times. Can be used for S-bends, altitude change after passing, or breaking out of a circle.
 You can also specify additional commands with `;` or `&`. Commands after a delayed command will be held up until the first command in the chain finishes.
+
+#### References
+Alternatively, instead of entering a plane callsign, you can enter `%` followed by a digit to assign to a "command slot". Later, you can command planes to execute the contents of the command slot using the same sequence (`%` digit). You can use this for preplanned routing.
 
 ### Example Commands
 | Keystrokes | Action |
-| :--------- | -----: |
+| ---------- | ------ |
 | `aa9`      | Send plane A to flight level 9 (9000ft). |
 | `aa=2`, `aa+2` | Send plane A 2 flight levels higher. |
 | `atw`      | Turn plane A so it moves due north. |
 | `atwa1`, `atw@1` | Turn plane A to the north when it arrives at beacon _*1_. |
 | `au`       | Unmark plane A until it arrives at the beacon. |
 | `ataa1;atxa0` | Turn plane A west when it arrives at beacon _*1_, then turn it south once it arrives at beacon _*0_. |
+| `ata;atwi3` | Move plane A 3 spaces west, then make it go north. |
 
 

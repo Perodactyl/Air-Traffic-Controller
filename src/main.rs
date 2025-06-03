@@ -37,7 +37,7 @@ pub struct GameSettings {
     allow_landing: bool,
 }
 
-#[derive(Parser, Debug)]
+#[derive(Debug, Clone, Parser)]
 #[command(version, about)]
 struct Args {
     ///Lists maps
@@ -55,6 +55,10 @@ struct Args {
     ///If present, planes' destinations will always be airports
     #[arg(short = 'L', long = "disallow-landing", default_value_t = true, action = clap::ArgAction::SetFalse)]
     allow_landing: bool,
+    ///Enter a sequence of keypresses to be entered before the game starts. Use ":" to finish a
+    ///command entry.
+    #[arg(short = 'i', long = "initialize", default_value_t = String::new())]
+    initialize: String,
 } impl Into<GameSettings> for Args {
     fn into(self) -> GameSettings {
         GameSettings {
@@ -90,13 +94,24 @@ fn main() -> Result<()> {
 
     let map_text = read(&map_file)?;
     let map_data: MapStatic = serde_json::de::from_slice(&map_text)?;
-    let settings = args.into();
+    let settings = args.clone().into();
     let mut map = Map::new(settings, map_data);
 
     let mut stdout = io::stdout().into_raw_mode()?.into_alternate_screen()?;
     write!(stdout, "{}", termion::cursor::Hide)?;
     stdout.flush()?;
     let mut input = termion::async_stdin();
+
+    for ch in args.initialize.chars() {
+        if ch == ':' {
+            if let Some(c) = map.current_command.to_complete() {
+                map.exec(c);
+                map.current_command.reset();
+            }
+        } else {
+            map.current_command.input(ch);
+        }
+    }
 
     map.render(&mut stdout)?;
 
